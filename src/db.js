@@ -1,4 +1,8 @@
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
+
+// DATE (oid 1082) vem do Postgres como 'YYYY-MM-DD' puro, sem virar objeto Date —
+// evita bugs de fuso horário e concatenação de string em toda a aplicação.
+types.setTypeParser(1082, (val) => val);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

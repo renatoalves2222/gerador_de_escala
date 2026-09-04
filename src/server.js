@@ -14,6 +14,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
+// rede de segurança: um erro dentro de uma rota async não deve mais derrubar
+// o processo inteiro (foi isso que causou os 502 em cascata).
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection:", err);
+});
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 const JWT_SECRET = process.env.JWT_SECRET || "troque-este-segredo-em-producao";
 const PORT = process.env.PORT || 3000;
 
@@ -44,7 +51,7 @@ function exigirAdmin(req, res, next) {
   next();
 }
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", ah(async (req, res) => {
   const { email, senha } = req.body || {};
   if (!email || !senha) return res.status(400).json({ erro: "Informe email e senha." });
   const { rows } = await pool.query("SELECT * FROM gestores WHERE email = $1", [String(email).toLowerCase()]);
@@ -53,17 +60,17 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ erro: "Email ou senha incorretos." });
   }
   res.json({ token: assinar(gestor), gestor: { id: gestor.id, nome: gestor.nome, is_admin: gestor.is_admin, setores: gestor.setores } });
-});
+}));
 
 app.get("/api/me", autenticar, (req, res) => res.json(req.gestor));
 
 // ------------------------------------------------------------ gestores
-app.get("/api/gestores", autenticar, exigirAdmin, async (req, res) => {
+app.get("/api/gestores", autenticar, exigirAdmin, ah(async (req, res) => {
   const { rows } = await pool.query("SELECT id, nome, email, is_admin, setores, criado_em FROM gestores ORDER BY nome");
   res.json(rows);
-});
+}));
 
-app.post("/api/gestores", autenticar, exigirAdmin, async (req, res) => {
+app.post("/api/gestores", autenticar, exigirAdmin, ah(async (req, res) => {
   const { nome, email, senha, setores, is_admin } = req.body || {};
   if (!nome || !email || !senha) return res.status(400).json({ erro: "Nome, email e senha são obrigatórios." });
   const senha_hash = await bcrypt.hash(senha, 10);
@@ -78,9 +85,9 @@ app.post("/api/gestores", autenticar, exigirAdmin, async (req, res) => {
     if (e.code === "23505") return res.status(409).json({ erro: "Já existe um gestor com esse email." });
     throw e;
   }
-});
+}));
 
-app.patch("/api/gestores/:id/setores", autenticar, exigirAdmin, async (req, res) => {
+app.patch("/api/gestores/:id/setores", autenticar, exigirAdmin, ah(async (req, res) => {
   const { setores } = req.body || {};
   const { rows } = await pool.query(
     "UPDATE gestores SET setores = $1 WHERE id = $2 RETURNING id, nome, email, is_admin, setores",
@@ -88,15 +95,15 @@ app.patch("/api/gestores/:id/setores", autenticar, exigirAdmin, async (req, res)
   );
   if (!rows[0]) return res.status(404).json({ erro: "Gestor não encontrado." });
   res.json(rows[0]);
-});
+}));
 
 // --------------------------------------------------------- colaboradores
-app.get("/api/colaboradores", autenticar, async (req, res) => {
+app.get("/api/colaboradores", autenticar, ah(async (req, res) => {
   const { rows } = await pool.query("SELECT * FROM colaboradores ORDER BY setor, cargo, nome");
   res.json(rows.map((c) => ({ ...c, precisaConfiguracao: precisaConfiguracao(c) })));
-});
+}));
 
-app.post("/api/colaboradores", autenticar, async (req, res) => {
+app.post("/api/colaboradores", autenticar, ah(async (req, res) => {
   const { nome, setor, cargo, regime, grupo, ciclo_inicio } = req.body || {};
   if (!nome || !setor || !cargo || !regime) return res.status(400).json({ erro: "Nome, setor, cargo e regime são obrigatórios." });
   const setorU = setor.toUpperCase();
@@ -108,10 +115,10 @@ app.post("/api/colaboradores", autenticar, async (req, res) => {
     [nome.toUpperCase(), setorU, cargo.toUpperCase(), regime, grupo || null, ciclo_inicio || null]
   );
   res.status(201).json(rows[0]);
-});
+}));
 
 // usado tanto para editar dados quanto para o gestor definir grupo (par/impar) / ciclo_inicio
-app.patch("/api/colaboradores/:id", autenticar, async (req, res) => {
+app.patch("/api/colaboradores/:id", autenticar, ah(async (req, res) => {
   const { rows: existentes } = await pool.query("SELECT * FROM colaboradores WHERE id = $1", [req.params.id]);
   const atual = existentes[0];
   if (!atual) return res.status(404).json({ erro: "Colaborador não encontrado." });
@@ -133,9 +140,9 @@ app.patch("/api/colaboradores/:id", autenticar, async (req, res) => {
     valores
   );
   res.json(rows[0]);
-});
+}));
 
-app.delete("/api/colaboradores/:id", autenticar, async (req, res) => {
+app.delete("/api/colaboradores/:id", autenticar, ah(async (req, res) => {
   const { rows: existentes } = await pool.query("SELECT setor FROM colaboradores WHERE id = $1", [req.params.id]);
   if (!existentes[0]) return res.status(404).end();
   if (!podeEditarSetor(req.gestor, existentes[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
@@ -143,13 +150,13 @@ app.delete("/api/colaboradores/:id", autenticar, async (req, res) => {
   if (emUso[0]) return res.status(409).json({ erro: "Colaborador já alocado em uma escala — remova a alocação primeiro." });
   await pool.query("DELETE FROM colaboradores WHERE id = $1", [req.params.id]);
   res.status(204).end();
-});
+}));
 
 // Importação em massa — mapeada às colunas reais do export de RH. Só admin importa
 // (é a base mestra da unidade inteira, não de um setor só). Faz upsert por "chapa":
 // reenviar o arquivo atualiza quem já existe (setor/cargo/regime/situação) sem
 // apagar grupo/ciclo_inicio já configurados pelo gestor.
-app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("arquivo"), async (req, res) => {
+app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("arquivo"), ah(async (req, res) => {
   if (!req.file) return res.status(400).json({ erro: "Envie o arquivo no campo 'arquivo'." });
   let parsed;
   try {
@@ -194,19 +201,19 @@ app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("
   }
 
   res.json({ novos, atualizados, inativados, problemas: parsed.problemas, totalLinhas: parsed.registros.length });
-});
+}));
 
-app.get("/api/setores", autenticar, async (req, res) => {
+app.get("/api/setores", autenticar, ah(async (req, res) => {
   const { rows } = await pool.query("SELECT DISTINCT setor FROM colaboradores ORDER BY setor");
   res.json(rows.map((r) => r.setor));
-});
+}));
 
 // -------------------------------------------------------------- escalas
 function periodosSobrepoem(aIni, aFim, bIni, bFim) {
   return !(aFim < bIni || bFim < aIni);
 }
 
-app.post("/api/escalas", autenticar, async (req, res) => {
+app.post("/api/escalas", autenticar, ah(async (req, res) => {
   const { setor, inicio, responsavel, excluidos } = req.body || {};
   if (!setor || !inicio || !responsavel) return res.status(400).json({ erro: "Setor, início e responsável são obrigatórios." });
   const setorU = setor.toUpperCase();
@@ -224,7 +231,7 @@ app.post("/api/escalas", autenticar, async (req, res) => {
   );
   const indisponiveis = new Set(
     alocadosAntes
-      .filter((a) => periodosSobrepoem(a.inicio.toISOString().slice(0, 10), a.fim.toISOString().slice(0, 10), inicio, fimISO))
+      .filter((a) => periodosSobrepoem(a.inicio, a.fim, inicio, fimISO))
       .map((a) => a.colaborador_id)
   );
 
@@ -254,19 +261,19 @@ app.post("/api/escalas", autenticar, async (req, res) => {
   } finally {
     client.release();
   }
-});
+}));
 
-app.get("/api/escalas", autenticar, async (req, res) => {
+app.get("/api/escalas", autenticar, ah(async (req, res) => {
   const { setor } = req.query;
   const { rows } = await pool.query(
     setor ? "SELECT * FROM escalas WHERE setor = $1 ORDER BY inicio DESC" : "SELECT * FROM escalas ORDER BY inicio DESC",
     setor ? [setor.toUpperCase()] : []
   );
   res.json(rows);
-});
+}));
 
 // grade pronta: dias x colaboradores, já com os códigos calculados
-app.get("/api/escalas/:id/grade", autenticar, async (req, res) => {
+app.get("/api/escalas/:id/grade", autenticar, ah(async (req, res) => {
   const { rows: escRows } = await pool.query("SELECT * FROM escalas WHERE id = $1", [req.params.id]);
   const escala = escRows[0];
   if (!escala) return res.status(404).json({ erro: "Escala não encontrada." });
@@ -280,7 +287,7 @@ app.get("/api/escalas/:id/grade", autenticar, async (req, res) => {
     [escala.id]
   );
   const overrideMap = {};
-  overrides.forEach((o) => { overrideMap[`${o.alocacao_id}|${o.dia.toISOString().slice(0, 10)}`] = o.codigo; });
+  overrides.forEach((o) => { overrideMap[`${o.alocacao_id}|${o.dia}`] = o.codigo; });
 
   const dias = [];
   const inicio = new Date(escala.inicio + "T00:00:00");
@@ -297,9 +304,9 @@ app.get("/api/escalas/:id/grade", autenticar, async (req, res) => {
   }));
 
   res.json({ escala, dias, linhas });
-});
+}));
 
-app.put("/api/alocacoes/:id/override", autenticar, async (req, res) => {
+app.put("/api/alocacoes/:id/override", autenticar, ah(async (req, res) => {
   const { dia, codigo } = req.body || {};
   if (!dia) return res.status(400).json({ erro: "Informe o dia (YYYY-MM-DD)." });
   const { rows: aloc } = await pool.query(
@@ -319,12 +326,19 @@ app.put("/api/alocacoes/:id/override", autenticar, async (req, res) => {
     [req.params.id, dia, codigo]
   );
   res.status(204).end();
-});
+}));
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // qualquer rota que não seja /api/* devolve o frontend (single-page app)
 app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
+
+// qualquer erro que escape das rotas cai aqui — nunca mais derruba o processo
+app.use((err, req, res, next) => {
+  console.error("Erro na rota", req.method, req.path, ":", err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ erro: "Erro interno do servidor." });
+});
 
 initSchema()
   .then(async () => {

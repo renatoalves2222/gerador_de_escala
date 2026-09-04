@@ -327,82 +327,113 @@ function VisaoEscala({token,gestor,podeEditar}){
   const [setores,setSetores]=useState([]);
   const [setorAtivo,setSetorAtivo]=useState(null);
   const [escalas,setEscalas]=useState([]);
+  const [escalaId,setEscalaId]=useState(null);
   const [grade,setGrade]=useState(null);
   const [carregando,setCarregando]=useState(true);
+  const [excluindo,setExcluindo]=useState(false);
 
   useEffect(()=>{ api("/api/setores",token).then(s=>{ setSetores(s); if(s[0]) setSetorAtivo(s[0]); }).finally(()=>setCarregando(false)); },[]);
   useEffect(()=>{
     if(!setorAtivo) return;
-    setGrade(null);
+    setGrade(null); setEscalaId(null);
     api(`/api/escalas?setor=${encodeURIComponent(setorAtivo)}`,token).then(es=>{
       setEscalas(es);
-      if(es[0]) api(`/api/escalas/${es[0].id}/grade`,token).then(setGrade);
+      if(es[0]){ setEscalaId(es[0].id); api(`/api/escalas/${es[0].id}/grade`,token).then(setGrade); }
     });
   },[setorAtivo]);
+
+  function abrirEscala(id){
+    setEscalaId(id); setGrade(null);
+    api(`/api/escalas/${id}/grade`,token).then(setGrade);
+  }
 
   async function marcarOverride(alocacaoId,dia,atual){
     if(!podeEditar(setorAtivo)) return;
     const seq=[null,"FE","FF"]; const proximo=seq[(seq.indexOf(atual)+1)%seq.length];
     await api(`/api/alocacoes/${alocacaoId}/override`,token,{method:"PUT",body:JSON.stringify({dia,codigo:proximo})});
-    setGrade(await api(`/api/escalas/${escalas[0].id}/grade`,token));
+    setGrade(await api(`/api/escalas/${escalaId}/grade`,token));
+  }
+
+  async function excluirEscala(){
+    if(!escalaId || !window.confirm("Excluir esta escala? Essa ação não pode ser desfeita.")) return;
+    setExcluindo(true);
+    try{
+      await api(`/api/escalas/${escalaId}`,token,{method:"DELETE"});
+      const es = await api(`/api/escalas?setor=${encodeURIComponent(setorAtivo)}`,token);
+      setEscalas(es);
+      if(es[0]){ setEscalaId(es[0].id); setGrade(await api(`/api/escalas/${es[0].id}/grade`,token)); }
+      else { setEscalaId(null); setGrade(null); }
+    } finally { setExcluindo(false); }
   }
 
   if(carregando) return h(Carregando);
   if(setores.length===0) return h(EmptyHint,{text:"Nenhum colaborador cadastrado ainda."});
 
-  return h("div",null,
-    h("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:4}},
-      h("h2",{style:{fontSize:16,fontWeight:600}}, grade?`${fmtBR(grade.dias[0])} a ${fmtBR(grade.dias[30])}`:"—"),
-      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
-        setores.map(s=>h("button",{key:s,className:"btn",onClick:()=>setSetorAtivo(s),style:{fontSize:14,padding:"6px 12px",borderRadius:20,border:`1px solid ${s===setorAtivo?teal:line}`,background:s===setorAtivo?teal:"transparent",color:s===setorAtivo?"#fff":ink}},s))
-      )
-    ),
-    !grade ? h(EmptyHint,{text:"Nenhuma escala gerada ainda para este setor."}) :
-    h(React.Fragment,null,
-      h("p",{style:{fontSize:12,marginBottom:16,color:muted,display:"flex",gap:6,alignItems:"center"}},
-        "Responsável: ", h("strong",null,grade.escala.responsavel),
-        !podeEditar(setorAtivo) && h("span",{style:{color:faint}}," 🔒 somente leitura")
-      ),
-      h("div",{style:{borderRadius:8,overflow:"hidden",border:`1px solid ${line}`,background:panel}},
-        h("div",{style:{overflowX:"auto"}},
-          h("table",{style:{fontSize:12,width:"100%"}},
-            h("thead",null, h("tr",null,
-              h("th",{style:{position:"sticky",left:0,textAlign:"left",padding:"8px 12px",background:tealDeep,color:"#fff",minWidth:210}},"Colaborador"),
-              grade.dias.map((dia,i)=>{
-                const wd = new Date(dia+"T00:00:00").getDay();
-                const bg = wd===0?sunday:wd===6?saturday:tealDeep;
-                return h("th",{key:i,style:{padding:"4px 6px",background:bg,color:"#fff",minWidth:30,textAlign:"center",fontWeight:400}},
-                  h("div",{style:{fontSize:9,opacity:.85}},WEEKDAYS[wd]), h("div",{style:{fontFamily:"monospace"}},dia.slice(-2)));
-              })
-            )),
-            h("tbody",null,
-              grade.linhas.map(linha=>{
-                const r = REGIMES[linha.colaborador.regime];
-                return h("tr",{key:linha.alocacaoId,style:{borderTop:`1px solid ${line}`}},
-                  h("td",{style:{position:"sticky",left:0,padding:"6px 12px",background:panel,borderRight:`1px solid ${line}`}},
-                    h("div",{style:{fontWeight:500}},linha.colaborador.nome),
-                    h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo} · ${r.label}`)
-                  ),
-                  grade.dias.map((dia,di)=>{
-                    const code = linha.dias[di];
-                    const wd = new Date(dia+"T00:00:00").getDay(); const weekend = wd===0||wd===6;
-                    let color = faint;
-                    if(code===r.codigo) color=r.cor;
-                    if(code==="FE") color="#8B5CF6";
-                    if(code==="FF") color="#B45309";
-                    return h("td",{key:di,onClick:()=>marcarOverride(linha.alocacaoId,dia,(code==="FE"||code==="FF")?code:null),
-                      style:{textAlign:"center",fontFamily:"monospace",padding:"6px 0",color,fontWeight:code==="F"?400:600,cursor:podeEditar(setorAtivo)?"pointer":"default",background:weekend?(wd===0?sunday+"12":saturday+"12"):"transparent",userSelect:"none"}
-                    },code);
-                  })
-                );
-              })
-            )
-          )
-        )
-      ),
-      h(Legenda)
+  const header = h("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:12}},
+    h("h2",{style:{fontSize:16,fontWeight:600}}, "Escalas"),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+      setores.map(s=>h("button",{key:s,className:"btn",onClick:()=>setSetorAtivo(s),style:{fontSize:14,padding:"6px 12px",borderRadius:20,border:`1px solid ${s===setorAtivo?teal:line}`,background:s===setorAtivo?teal:"transparent",color:s===setorAtivo?"#fff":ink}},s))
     )
   );
+
+  if (escalas.length===0) return h("div",null, header, h(EmptyHint,{text:"Nenhuma escala gerada ainda para este setor."}));
+
+  const seletorPeriodos = h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
+    escalas.map(e=>h("button",{key:e.id,className:"btn",onClick:()=>abrirEscala(e.id),
+      style:{fontSize:13,padding:"6px 12px",borderRadius:6,border:`1px solid ${e.id===escalaId?teal:line}`,background:e.id===escalaId?teal+"12":panel,color:e.id===escalaId?teal:muted,fontWeight:e.id===escalaId?600:400}},
+      `${fmtBR(e.inicio)} a ${fmtBR(e.fim)}`
+    ))
+  );
+
+  if (!grade) return h("div",null, header, seletorPeriodos, h(Carregando));
+
+  const linhaResponsavel = h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}},
+    h("p",{style:{fontSize:12,color:muted,display:"flex",gap:6,alignItems:"center",margin:0}},
+      "Responsável: ", h("strong",null,grade.escala.responsavel),
+      !podeEditar(setorAtivo) && h("span",{style:{color:faint}}," 🔒 somente leitura")
+    ),
+    podeEditar(setorAtivo) && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
+  );
+
+  const tabela = h("div",{style:{borderRadius:8,overflow:"hidden",border:`1px solid ${line}`,background:panel}},
+    h("div",{style:{overflowX:"auto"}},
+      h("table",{style:{fontSize:12,width:"100%"}},
+        h("thead",null, h("tr",null,
+          h("th",{style:{position:"sticky",left:0,textAlign:"left",padding:"8px 12px",background:tealDeep,color:"#fff",minWidth:210}},"Colaborador"),
+          grade.dias.map((dia,i)=>{
+            const wd = new Date(dia+"T00:00:00").getDay();
+            const bg = wd===0?sunday:wd===6?saturday:tealDeep;
+            return h("th",{key:i,style:{padding:"4px 6px",background:bg,color:"#fff",minWidth:30,textAlign:"center",fontWeight:400}},
+              h("div",{style:{fontSize:9,opacity:.85}},WEEKDAYS[wd]), h("div",{style:{fontFamily:"monospace"}},dia.slice(-2)));
+          })
+        )),
+        h("tbody",null,
+          grade.linhas.map(linha=>{
+            const r = REGIMES[linha.colaborador.regime];
+            return h("tr",{key:linha.alocacaoId,style:{borderTop:`1px solid ${line}`}},
+              h("td",{style:{position:"sticky",left:0,padding:"6px 12px",background:panel,borderRight:`1px solid ${line}`}},
+                h("div",{style:{fontWeight:500}},linha.colaborador.nome),
+                h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo} · ${r.label}`)
+              ),
+              grade.dias.map((dia,di)=>{
+                const code = linha.dias[di];
+                const wd = new Date(dia+"T00:00:00").getDay(); const weekend = wd===0||wd===6;
+                let color = faint;
+                if(code===r.codigo) color=r.cor;
+                if(code==="FE") color="#8B5CF6";
+                if(code==="FF") color="#B45309";
+                return h("td",{key:di,onClick:()=>marcarOverride(linha.alocacaoId,dia,(code==="FE"||code==="FF")?code:null),
+                  style:{textAlign:"center",fontFamily:"monospace",padding:"6px 0",color,fontWeight:code==="F"?400:600,cursor:podeEditar(setorAtivo)?"pointer":"default",background:weekend?(wd===0?sunday+"12":saturday+"12"):"transparent",userSelect:"none"}
+                },code);
+              })
+            );
+          })
+        )
+      )
+    )
+  );
+
+  return h("div",null, header, seletorPeriodos, linhaResponsavel, tabela, h(Legenda));
 }
 
 function Legenda(){

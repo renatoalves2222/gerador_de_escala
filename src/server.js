@@ -272,6 +272,14 @@ app.get("/api/escalas", autenticar, ah(async (req, res) => {
   res.json(rows);
 }));
 
+app.delete("/api/escalas/:id", autenticar, ah(async (req, res) => {
+  const { rows } = await pool.query("SELECT setor FROM escalas WHERE id = $1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ erro: "Escala não encontrada." });
+  if (!podeEditarSetor(req.gestor, rows[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+  await pool.query("DELETE FROM escalas WHERE id = $1", [req.params.id]);
+  res.status(204).end();
+}));
+
 // grade pronta: dias x colaboradores, já com os códigos calculados
 app.get("/api/escalas/:id/grade", autenticar, ah(async (req, res) => {
   const { rows: escRows } = await pool.query("SELECT * FROM escalas WHERE id = $1", [req.params.id]);

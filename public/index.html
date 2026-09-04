@@ -331,6 +331,8 @@ function VisaoEscala({token,gestor,podeEditar}){
   const [grade,setGrade]=useState(null);
   const [carregando,setCarregando]=useState(true);
   const [excluindo,setExcluindo]=useState(false);
+  const [modo,setModo]=useState("grade"); // grade | dia
+  const [exportando,setExportando]=useState(false);
 
   useEffect(()=>{ api("/api/setores",token).then(s=>{ setSetores(s); if(s[0]) setSetorAtivo(s[0]); }).finally(()=>setCarregando(false)); },[]);
   useEffect(()=>{
@@ -366,6 +368,21 @@ function VisaoEscala({token,gestor,podeEditar}){
     } finally { setExcluindo(false); }
   }
 
+  async function exportarPdf(){
+    setExportando(true);
+    try{
+      const res = await fetch(`/api/escalas/${escalaId}/pdf`, { headers: { Authorization: `Bearer ${token}` } });
+      if(!res.ok) throw new Error("Falha ao gerar PDF");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `escala-${setorAtivo}-${grade.escala.inicio}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch(e){ window.alert(e.message || "Não foi possível exportar."); }
+    finally { setExportando(false); }
+  }
+
   if(carregando) return h(Carregando);
   if(setores.length===0) return h(EmptyHint,{text:"Nenhum colaborador cadastrado ainda."});
 
@@ -392,7 +409,14 @@ function VisaoEscala({token,gestor,podeEditar}){
       "Responsável: ", h("strong",null,grade.escala.responsavel),
       !podeEditar(setorAtivo) && h("span",{style:{color:faint}}," 🔒 somente leitura")
     ),
-    podeEditar(setorAtivo) && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+      h("div",{style:{display:"flex",borderRadius:6,overflow:"hidden",border:`1px solid ${line}`}},
+        h("button",{className:"btn",onClick:()=>setModo("grade"),style:{fontSize:12,padding:"6px 10px",background:modo==="grade"?teal:panel,color:modo==="grade"?"#fff":muted}},"Grade completa"),
+        h("button",{className:"btn",onClick:()=>setModo("dia"),style:{fontSize:12,padding:"6px 10px",background:modo==="dia"?teal:panel,color:modo==="dia"?"#fff":muted}},"Por dia")
+      ),
+      h(Button,{onClick:exportarPdf,disabled:exportando,style:{padding:"4px 10px",fontSize:12}}, exportando?h(Spinner):null," Exportar PDF"),
+      podeEditar(setorAtivo) && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
+    )
   );
 
   const tabela = h("div",{style:{borderRadius:8,overflow:"hidden",border:`1px solid ${line}`,background:panel}},
@@ -433,7 +457,36 @@ function VisaoEscala({token,gestor,podeEditar}){
     )
   );
 
-  return h("div",null, header, seletorPeriodos, linhaResponsavel, tabela, h(Legenda));
+  const porDia = h("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+    grade.dias.map((dia,di)=>{
+      const wd = new Date(dia+"T00:00:00").getDay();
+      const trabalhando = grade.linhas
+        .map(linha=>({ linha, code: linha.dias[di] }))
+        .filter(({code})=>code!=="F");
+      const corFaixa = wd===0?sunday:wd===6?saturday:tealDeep;
+      return h("div",{key:dia,style:{background:panel,border:`1px solid ${line}`,borderRadius:8,overflow:"hidden"}},
+        h("div",{style:{background:corFaixa,color:"#fff",padding:"6px 12px",fontSize:12,fontWeight:600,display:"flex",gap:8,alignItems:"center"}},
+          h("span",null, `${WEEKDAYS[wd]} ${dia.slice(-2)}/${dia.slice(5,7)}`),
+          h("span",{style:{fontWeight:400,opacity:.85}}, `${trabalhando.length} em turno`)
+        ),
+        trabalhando.length===0 ? h("p",{style:{fontSize:12,color:faint,padding:"8px 12px",margin:0}},"Ninguém escalado neste dia.") :
+        h("div",{style:{padding:"6px 12px"}},
+          trabalhando.map(({linha,code})=>{
+            const r = REGIMES[linha.colaborador.regime];
+            let cor = r.cor;
+            if(code==="FE") cor="#8B5CF6"; if(code==="FF") cor="#B45309";
+            return h("div",{key:linha.alocacaoId,style:{display:"flex",alignItems:"center",gap:8,padding:"4px 0",fontSize:13,borderTop:`1px solid ${line}`}},
+              h("span",{style:{fontSize:10,fontFamily:"monospace",fontWeight:700,color:cor,width:36}},code),
+              h("span",{style:{flex:1}},linha.colaborador.nome),
+              h("span",{style:{fontSize:11,color:faint}},linha.colaborador.cargo)
+            );
+          })
+        )
+      );
+    })
+  );
+
+  return h("div",null, header, seletorPeriodos, linhaResponsavel, modo==="grade"?tabela:porDia, h(Legenda));
 }
 
 function Legenda(){

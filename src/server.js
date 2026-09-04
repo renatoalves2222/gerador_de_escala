@@ -7,6 +7,7 @@ const multer = require("multer");
 const { pool, initSchema } = require("./db");
 const { parsePlanilha } = require("./importer");
 const { REGIMES, precisaConfiguracao, codigoDoDia } = require("./regimes");
+const { gerarPdfEscala } = require("./pdf");
 
 const app = express();
 app.use(cors());
@@ -281,13 +282,14 @@ app.delete("/api/escalas/:id", autenticar, ah(async (req, res) => {
 }));
 
 // grade pronta: dias x colaboradores, já com os códigos calculados
-app.get("/api/escalas/:id/grade", autenticar, ah(async (req, res) => {
-  const { rows: escRows } = await pool.query("SELECT * FROM escalas WHERE id = $1", [req.params.id]);
+async function montarGrade(escalaId) {
+  const { rows: escRows } = await pool.query("SELECT * FROM escalas WHERE id = $1", [escalaId]);
   const escala = escRows[0];
-  if (!escala) return res.status(404).json({ erro: "Escala não encontrada." });
+  if (!escala) return null;
 
   const { rows: alocacoes } = await pool.query(
-    `SELECT a.id AS alocacao_id, c.* FROM alocacoes a JOIN colaboradores c ON c.id = a.colaborador_id WHERE a.escala_id = $1`,
+    `SELECT a.id AS alocacao_id, c.* FROM alocacoes a JOIN colaboradores c ON c.id = a.colaborador_id WHERE a.escala_id = $1
+     ORDER BY c.cargo, c.regime, c.nome`,
     [escala.id]
   );
   const { rows: overrides } = await pool.query(
@@ -311,7 +313,21 @@ app.get("/api/escalas/:id/grade", autenticar, ah(async (req, res) => {
     dias: dias.map((dia) => codigoDoDia(a, dia, overrideMap[`${a.alocacao_id}|${dia}`])),
   }));
 
-  res.json({ escala, dias, linhas });
+  return { escala, dias, linhas };
+}
+
+app.get("/api/escalas/:id/grade", autenticar, ah(async (req, res) => {
+  const grade = await montarGrade(req.params.id);
+  if (!grade) return res.status(404).json({ erro: "Escala não encontrada." });
+  res.json(grade);
+}));
+
+app.get("/api/escalas/:id/pdf", autenticar, ah(async (req, res) => {
+  const grade = await montarGrade(req.params.id);
+  if (!grade) return res.status(404).json({ erro: "Escala não encontrada." });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="escala-${grade.escala.setor}-${grade.escala.inicio}.pdf"`);
+  gerarPdfEscala(grade, res);
 }));
 
 app.put("/api/alocacoes/:id/override", autenticar, ah(async (req, res) => {

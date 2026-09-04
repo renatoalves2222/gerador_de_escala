@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Escala UPA D'Água</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F6F8F7; color: #16232B; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  input, select, button { font-family: inherit; font-size: 14px; }
+  table { border-collapse: collapse; }
+  ::placeholder { color: #8B9694; }
+  .btn { cursor: pointer; border: none; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { useState, useEffect, useRef, createElement: h } = React;
+
+// ---- design tokens -------------------------------------------------------
+const ink="#16232B", paper="#F6F8F7", panel="#FFFFFF", line="#DCE3E1", muted="#5B6866", faint="#8B9694";
+const teal="#0E4F52", tealDeep="#08363A", amber="#D98B2B", indigo="#3E4C8C", verde="#2F7A52", rosa="#A34A6F";
+const sunday="#C85A4E", saturday="#D9A441", danger="#B0453D";
+
+const REGIMES = {
+  doze36Diurno:{label:"12x36 Diurno",codigo:"PD",cor:amber},
+  doze36Noturno:{label:"12x36 Noturno",codigo:"PN",cor:indigo},
+  doze48Diurno:{label:"12x48 Diurno",codigo:"PD48",cor:amber},
+  doze48Noturno:{label:"12x48 Noturno",codigo:"PN48",cor:indigo},
+  administrativo:{label:"Administrativo (40h)",codigo:"EXP",cor:verde},
+  parcial4h:{label:"Parcial (4h/dia)",codigo:"EXP4",cor:rosa},
+};
+const REGIME_ORDEM = ["doze36Diurno","doze36Noturno","doze48Diurno","doze48Noturno","administrativo","parcial4h"];
+const precisaParidade = r => r==="doze36Diurno"||r==="doze36Noturno";
+const precisaCiclo = r => r==="doze48Diurno"||r==="doze48Noturno";
+const WEEKDAYS = ["DOM","SEG","TER","QUA","QUI","SEX","SÁB"];
+const fmtBR = iso => { const [y,m,d]=iso.split("-"); return `${d}/${m}`; };
+const addDaysISO = (iso,n) => { const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+
+async function api(path, token, opts={}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      ...(opts.body && !(opts.body instanceof FormData) ? {"Content-Type":"application/json"} : {}),
+      ...(token ? {Authorization:`Bearer ${token}`} : {}),
+      ...(opts.headers||{}),
+    },
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(()=>null);
+  if (!res.ok) throw new Error((data&&data.erro)||`Erro ${res.status}`);
+  return data;
+}
+
+function Field(props){ return h("div",null, h("label",{style:{display:"block",fontSize:12,marginBottom:4,color:muted}},props.label), props.children); }
+function EmptyHint(props){ return h("div",{style:{background:panel,border:`1px dashed ${line}`,borderRadius:8,padding:32,textAlign:"center",fontSize:14,color:faint}}, props.text); }
+function Spinner(){ return h("span",{className:"spin",style:{display:"inline-block"}},"⟳"); }
+function Carregando(){ return h("div",{style:{display:"flex",gap:8,justifyContent:"center",padding:40,color:faint,fontSize:14}}, h(Spinner), " Carregando…"); }
+function Input(props){ return h("input", Object.assign({style:{width:"100%",border:`1px solid ${line}`,borderRadius:6,padding:"6px 10px",fontSize:14}}, props)); }
+function Select(props){ return h("select", Object.assign({style:{width:"100%",border:`1px solid ${line}`,borderRadius:6,padding:"6px 10px",fontSize:14}}, props), props.children); }
+function Button(props){
+  const {primary, style, ...rest} = props;
+  return h("button", Object.assign({className:"btn", style: Object.assign({padding:"8px 14px",borderRadius:6,fontSize:14, background: primary?teal:"transparent", color: primary?"#fff":ink, border: primary?"none":`1px solid ${line}`, display:"flex",alignItems:"center",gap:6,justifyContent:"center"}, style||{})}, rest), props.children);
+}
+
+// =============================================================== App root
+function App(){
+  const [token,setToken] = useState(null);
+  const [gestor,setGestor] = useState(null);
+  if (!token) return h(Login,{onLogin:(t,g)=>{setToken(t);setGestor(g);}});
+  return h(Painel,{token,gestor,onLogout:()=>{setToken(null);setGestor(null);}});
+}
+
+function Login({onLogin}){
+  const [email,setEmail]=useState(""); const [senha,setSenha]=useState("");
+  const [erro,setErro]=useState(null); const [carregando,setCarregando]=useState(false);
+  async function entrar(){
+    setErro(null); setCarregando(true);
+    try {
+      const data = await api("/api/auth/login", null, {method:"POST", body: JSON.stringify({email,senha})});
+      onLogin(data.token, data.gestor);
+    } catch(e){ setErro(e.message||"Não foi possível entrar."); }
+    finally { setCarregando(false); }
+  }
+  return h("div",{style:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}},
+    h("div",{style:{background:panel,border:`1px solid ${line}`,width:340,borderRadius:8,padding:24}},
+      h("div",{style:{fontSize:12,color:faint,marginBottom:4}},"UPA D'ÁGUA · ASELC"),
+      h("h1",{style:{fontSize:18,fontWeight:600,marginBottom:20}},"Entrar no sistema de escalas"),
+      h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+        h(Field,{label:"Email"}, h(Input,{value:email,onChange:e=>setEmail(e.target.value),onKeyDown:e=>e.key==="Enter"&&entrar()})),
+        h(Field,{label:"Senha"}, h(Input,{type:"password",value:senha,onChange:e=>setSenha(e.target.value),onKeyDown:e=>e.key==="Enter"&&entrar()})),
+        erro && h("p",{style:{fontSize:12,color:danger}},erro),
+        h(Button,{primary:true,onClick:entrar,disabled:carregando}, carregando?h(Spinner):null, " Entrar")
+      )
+    )
+  );
+}
+
+function TabButton({label,active,onClick}){
+  return h("button",{className:"btn",onClick,style:{fontSize:14,padding:"6px 12px",borderRadius:6,background:active?panel:"transparent",color:active?ink:muted,fontWeight:active?600:400}}, label);
+}
+
+function Painel({token,gestor,onLogout}){
+  const [aba,setAba]=useState("colaboradores");
+  const [colaboradores,setColaboradores]=useState([]);
+  const [carregando,setCarregando]=useState(true);
+  const [erroGlobal,setErroGlobal]=useState(null);
+
+  async function recarregarColaboradores(){
+    try { setColaboradores(await api("/api/colaboradores",token)); }
+    catch(e){ setErroGlobal(e.message); }
+  }
+  useEffect(()=>{ setCarregando(true); recarregarColaboradores().finally(()=>setCarregando(false)); },[]);
+
+  const podeEditar = setor => gestor.is_admin || gestor.setores.includes(setor);
+
+  return h("div",{style:{minHeight:"100vh"}},
+    h("div",{style:{maxWidth:1100,margin:"0 auto",padding:"32px 24px"}},
+      h("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:16,alignItems:"center"}},
+        h("div",null,
+          h("div",{style:{fontSize:12,color:faint}},"UPA D'ÁGUA · ASELC"),
+          h("h1",{style:{fontSize:20,fontWeight:600,marginTop:2}},"Gestão de Escalas")
+        ),
+        h("div",{style:{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}},
+          h("div",{style:{display:"flex",gap:8,alignItems:"center",fontSize:14,padding:"6px 12px",borderRadius:6,border:`1px solid ${line}`,background:panel}},
+            h("span",{style:{color:muted}},gestor.nome),
+            gestor.is_admin && h("span",{style:{fontSize:10,padding:"2px 6px",borderRadius:10,background:teal+"1A",color:teal}},"ADMIN"),
+            h("button",{className:"btn",onClick:onLogout,title:"Sair",style:{color:faint}},"⏻")
+          ),
+          h("nav",{style:{display:"flex",gap:4,borderRadius:6,padding:4,background:"#EDEFEE"}},
+            h(TabButton,{label:"Colaboradores",active:aba==="colaboradores",onClick:()=>setAba("colaboradores")}),
+            h(TabButton,{label:"Nova Escala",active:aba==="nova",onClick:()=>setAba("nova")}),
+            h(TabButton,{label:"Escalas",active:aba==="escala",onClick:()=>setAba("escala")}),
+            gestor.is_admin && h(TabButton,{label:"Gestores",active:aba==="gestores",onClick:()=>setAba("gestores")})
+          )
+        )
+      ),
+      h("p",{style:{fontSize:12,marginTop:12,color:faint}}, gestor.is_admin ? "Acesso de administrador — todos os setores" : `Você vê todos os setores, mas só pode alterar: ${gestor.setores.join(", ")||"nenhum"}`),
+      erroGlobal && h("p",{style:{fontSize:12,marginTop:8,color:danger}},erroGlobal),
+      h("div",{style:{marginTop:24}},
+        carregando ? h(Carregando) :
+        aba==="colaboradores" ? h(Colaboradores,{token,gestor,colaboradores,recarregar:recarregarColaboradores,podeEditar}) :
+        aba==="nova" ? h(NovaEscala,{token,gestor,colaboradores,podeEditar,onGerada:()=>setAba("escala")}) :
+        aba==="escala" ? h(VisaoEscala,{token,gestor,podeEditar}) :
+        aba==="gestores" && gestor.is_admin ? h(Gestores,{token,colaboradores}) : null
+      )
+    )
+  );
+}
+
+// =========================================================== Colaboradores
+function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
+  const [form,setForm]=useState({nome:"",setor:"",cargo:"",regime:"doze36Diurno",grupo:"par",ciclo_inicio:""});
+  const [erro,setErro]=useState(null);
+  const [importMsg,setImportMsg]=useState(null);
+  const [importando,setImportando]=useState(false);
+  const fileRef=useRef(null);
+
+  async function cadastrar(){
+    setErro(null);
+    const setorU = form.setor.toUpperCase();
+    if(!form.nome.trim()||!setorU||!form.cargo.trim()) return;
+    try{
+      await api("/api/colaboradores",token,{method:"POST",body:JSON.stringify({
+        nome:form.nome, setor:setorU, cargo:form.cargo, regime:form.regime,
+        grupo: precisaParidade(form.regime)?form.grupo:null,
+        ciclo_inicio: precisaCiclo(form.regime)?form.ciclo_inicio:null,
+      })});
+      setForm({nome:"",setor:"",cargo:"",regime:"doze36Diurno",grupo:"par",ciclo_inicio:""});
+      recarregar();
+    }catch(e){ setErro(e.message); }
+  }
+  async function salvarConfig(c,patch){ await api(`/api/colaboradores/${c.id}`,token,{method:"PATCH",body:JSON.stringify(patch)}); recarregar(); }
+  async function remover(id){ try{ await api(`/api/colaboradores/${id}`,token,{method:"DELETE"}); recarregar(); }catch(e){ setErro(e.message); } }
+
+  async function importarArquivo(e){
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    setImportando(true); setImportMsg(null);
+    try{
+      const fd = new FormData(); fd.append("arquivo",file);
+      const data = await api("/api/colaboradores/importar",token,{method:"POST",body:fd});
+      setImportMsg({ok:true,texto:`${data.novos} novo(s) · ${data.atualizados} atualizado(s) · ${data.inativados} inativado(s)${data.problemas.length?` · ${data.problemas.length} linha(s) com problema`:""}`});
+      recarregar();
+    }catch(e2){ setImportMsg({ok:false,texto:e2.message}); }
+    finally{ setImportando(false); e.target.value=""; }
+  }
+
+  return h("div",{style:{display:"grid",gridTemplateColumns:window.innerWidth>1024?"320px 1fr":"1fr",gap:24}},
+    h("div",{style:{display:"flex",flexDirection:"column",gap:16}},
+      h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20}},
+        h("h2",{style:{fontSize:14,fontWeight:600,marginBottom:4}},"Cadastrar colaborador"),
+        h("p",{style:{fontSize:12,color:muted,marginBottom:16}},"Só é possível cadastrar em setores sob sua responsabilidade."),
+        h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+          h(Field,{label:"Nome"}, h(Input,{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value}))})),
+          h(Field,{label:"Setor"}, h(Input,{value:form.setor,placeholder:"Ex: RECEPCAO",onChange:e=>setForm(f=>({...f,setor:e.target.value}))})),
+          h(Field,{label:"Cargo"}, h(Input,{value:form.cargo,onChange:e=>setForm(f=>({...f,cargo:e.target.value}))})),
+          h(Field,{label:"Regime"}, h(Select,{value:form.regime,onChange:e=>setForm(f=>({...f,regime:e.target.value}))}, REGIME_ORDEM.map(k=>h("option",{key:k,value:k},REGIMES[k].label)))),
+          precisaParidade(form.regime) && h(Field,{label:"Grupo"}, h(Select,{value:form.grupo,onChange:e=>setForm(f=>({...f,grupo:e.target.value}))}, h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar"))),
+          precisaCiclo(form.regime) && h(Field,{label:"Início do ciclo (1º dia de trabalho)"}, h(Input,{type:"date",value:form.ciclo_inicio,onChange:e=>setForm(f=>({...f,ciclo_inicio:e.target.value}))})),
+          erro && h("p",{style:{fontSize:12,color:danger}},erro),
+          h(Button,{primary:true,onClick:cadastrar},"+ Cadastrar")
+        )
+      ),
+      gestor.is_admin && h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20}},
+        h("h2",{style:{fontSize:14,fontWeight:600,marginBottom:4}},"Importar planilha de RH"),
+        h("p",{style:{fontSize:12,color:muted,marginBottom:12}},"Envie o export original (.xlsx). Atualiza quem já existe pela Chapa, sem apagar Grupo/Ciclo já configurados."),
+        h("input",{ref:fileRef,type:"file",accept:".xlsx,.xls",style:{display:"none"},onChange:importarArquivo}),
+        h(Button,{primary:true,onClick:()=>fileRef.current&&fileRef.current.click(),disabled:importando,style:{width:"100%"}}, importando?h(Spinner):null," Importar arquivo"),
+        importMsg && h("p",{style:{fontSize:12,marginTop:12,color:importMsg.ok?teal:danger}},importMsg.texto)
+      )
+    ),
+    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,overflow:"hidden"}},
+      h("table",{style:{width:"100%",fontSize:14}},
+        h("thead",null, h("tr",{style:{background:"#F1F4F3"}}, ["Nome","Setor","Cargo","Regime","Config.",""].map(hd=>h("th",{key:hd,style:{textAlign:"left",padding:"8px 16px",fontWeight:500,color:muted}},hd)))),
+        h("tbody",null,
+          colaboradores.length===0 && h("tr",null, h("td",{colSpan:6,style:{textAlign:"center",padding:24,color:faint}},"Nenhum colaborador cadastrado ainda.")),
+          colaboradores.map(c=>{
+            const r = REGIMES[c.regime];
+            const editavel = podeEditar(c.setor);
+            return h("tr",{key:c.id,style:{borderTop:`1px solid ${line}`,opacity:c.situacao==="A"?1:0.5}},
+              h("td",{style:{padding:"10px 16px",fontWeight:500}}, c.nome, c.situacao!=="A" && h("span",{style:{marginLeft:6,fontSize:10,color:danger}},"INATIVO")),
+              h("td",{style:{padding:"10px 16px",color:muted}},c.setor),
+              h("td",{style:{padding:"10px 16px",color:muted}},c.cargo),
+              h("td",{style:{padding:"10px 16px"}}, h("span",{style:{fontSize:12,padding:"2px 8px",borderRadius:10,background:r.cor+"1A",color:r.cor}},r.label)),
+              h("td",{style:{padding:"10px 16px"}},
+                (editavel && c.situacao==="A") ? h(ConfigInline,{colaborador:c,onSalvar:patch=>salvarConfig(c,patch)}) :
+                c.precisaConfiguracao ? h("span",{style:{fontSize:10,color:danger}},"⚠ pendente") :
+                h("span",{style:{fontSize:12,color:faint}}, c.grupo || c.ciclo_inicio || "—")
+              ),
+              h("td",{style:{padding:"10px 16px",textAlign:"right"}},
+                editavel ? h("button",{className:"btn",onClick:()=>remover(c.id),style:{color:danger},title:"Remover"},"🗑") : h("span",{style:{color:faint}},"🔒")
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+function ConfigInline({colaborador,onSalvar}){
+  const [grupo,setGrupo]=useState(colaborador.grupo||"par");
+  const [ciclo,setCiclo]=useState(colaborador.ciclo_inicio||"");
+  const corBorda = colaborador.precisaConfiguracao ? danger : line;
+  if (precisaParidade(colaborador.regime)){
+    return h("select",{value:grupo,onChange:e=>{setGrupo(e.target.value);onSalvar({grupo:e.target.value});},style:{fontSize:12,border:`1px solid ${corBorda}`,borderRadius:4,padding:"4px 6px"}},
+      h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar"));
+  }
+  if (precisaCiclo(colaborador.regime)){
+    return h("input",{type:"date",value:ciclo,onChange:e=>{setCiclo(e.target.value);onSalvar({ciclo_inicio:e.target.value});},style:{fontSize:12,border:`1px solid ${corBorda}`,borderRadius:4,padding:"4px 6px"}});
+  }
+  return h("span",{style:{fontSize:12,color:faint}},"—");
+}
+
+// =============================================================== NovaEscala
+function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
+  const [inicio,setInicio]=useState(new Date().toISOString().slice(0,10));
+  const [setor,setSetor]=useState("");
+  const [responsavel,setResponsavel]=useState("");
+  const [excluidos,setExcluidos]=useState({});
+  const [erro,setErro]=useState(null);
+  const [resultado,setResultado]=useState(null);
+  const [enviando,setEnviando]=useState(false);
+
+  const setoresProprios = [...new Set(colaboradores.map(c=>c.setor))].filter(podeEditar);
+  const doSetor = colaboradores.filter(c=>c.setor===setor && c.situacao==="A");
+  const cargos = [...new Set(doSetor.map(c=>c.cargo))];
+
+  async function gerar(){
+    setErro(null); setResultado(null);
+    if(!setor||!responsavel.trim()) return;
+    setEnviando(true);
+    try{
+      const data = await api("/api/escalas",token,{method:"POST",body:JSON.stringify({setor,inicio,responsavel,excluidos:Object.keys(excluidos).filter(id=>excluidos[id])})});
+      setResultado(data); setExcluidos({}); setResponsavel("");
+      setTimeout(onGerada,900);
+    }catch(e){ setErro(e.message); }
+    finally{ setEnviando(false); }
+  }
+
+  return h("div",{style:{display:"grid",gridTemplateColumns:window.innerWidth>1024?"280px 1fr":"1fr",gap:24}},
+    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20,display:"flex",flexDirection:"column",gap:16,height:"fit-content"}},
+      h(Field,{label:"Início do ciclo"}, h(Input,{type:"date",value:inicio,onChange:e=>setInicio(e.target.value)})),
+      h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(addDaysISO(inicio,30)))),
+      h(Field,{label:"Setor"}, h(Select,{value:setor,onChange:e=>{setSetor(e.target.value);setExcluidos({});setResultado(null);}},
+        h("option",{value:""},"Selecione…"), setoresProprios.map(s=>h("option",{key:s,value:s},s)))),
+      setoresProprios.length===0 && h("p",{style:{fontSize:12,color:danger}},"Você não é responsável por nenhum setor com colaboradores."),
+      h(Field,{label:"Responsável pelo setor"}, h(Input,{value:responsavel,placeholder:"Nome de quem assina",onChange:e=>setResponsavel(e.target.value)})),
+      erro && h("p",{style:{fontSize:12,color:danger}},erro),
+      resultado && h("p",{style:{fontSize:12,color:teal}},`Escala gerada — ${resultado.incluidos} colaborador(es) incluído(s).`)
+    ),
+    h("div",null,
+      !setor ? h(EmptyHint,{text:"Escolha o setor — a lista de colaboradores vem do cadastro."}) :
+      cargos.length===0 ? h(EmptyHint,{text:"Nenhum colaborador ativo neste setor."}) :
+      h("div",{style:{display:"flex",flexDirection:"column",gap:16}},
+        cargos.map(cg => h("div",{key:cg,style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:16}},
+          h("div",{style:{fontSize:14,fontWeight:600,marginBottom:12}},cg),
+          h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+            doSetor.filter(c=>c.cargo===cg).map(c=>{
+              const r = REGIMES[c.regime]; const bloqueado = c.precisaConfiguracao; const incluido = !excluidos[c.id] && !bloqueado;
+              return h("button",{key:c.id,className:"btn",disabled:bloqueado,onClick:()=>setExcluidos(e=>({...e,[c.id]:!e[c.id]})),
+                style:{display:"flex",alignItems:"center",gap:8,textAlign:"left",fontSize:14,padding:"8px 12px",borderRadius:6,border:`1px solid ${incluido?r.cor:line}`,background:incluido?r.cor+"12":"transparent"}},
+                h("span",{style:{width:16,height:16,borderRadius:3,background:incluido?r.cor:"#EDEFEE",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,flexShrink:0}}, incluido?"✓":""),
+                h("span",{style:{flex:1}},c.nome),
+                bloqueado && h("span",{style:{fontSize:10,color:danger}},"⚠ falta configurar")
+              );
+            })
+          )
+        )),
+        h("div",{style:{display:"flex",justifyContent:"flex-end",paddingTop:8}},
+          h(Button,{primary:true,disabled:!responsavel.trim()||enviando,onClick:gerar}, enviando?h(Spinner):null," Gerar escala →")
+        )
+      )
+    )
+  );
+}
+
+// ============================================================== VisaoEscala
+function VisaoEscala({token,gestor,podeEditar}){
+  const [setores,setSetores]=useState([]);
+  const [setorAtivo,setSetorAtivo]=useState(null);
+  const [escalas,setEscalas]=useState([]);
+  const [grade,setGrade]=useState(null);
+  const [carregando,setCarregando]=useState(true);
+
+  useEffect(()=>{ api("/api/setores",token).then(s=>{ setSetores(s); if(s[0]) setSetorAtivo(s[0]); }).finally(()=>setCarregando(false)); },[]);
+  useEffect(()=>{
+    if(!setorAtivo) return;
+    setGrade(null);
+    api(`/api/escalas?setor=${encodeURIComponent(setorAtivo)}`,token).then(es=>{
+      setEscalas(es);
+      if(es[0]) api(`/api/escalas/${es[0].id}/grade`,token).then(setGrade);
+    });
+  },[setorAtivo]);
+
+  async function marcarOverride(alocacaoId,dia,atual){
+    if(!podeEditar(setorAtivo)) return;
+    const seq=[null,"FE","FF"]; const proximo=seq[(seq.indexOf(atual)+1)%seq.length];
+    await api(`/api/alocacoes/${alocacaoId}/override`,token,{method:"PUT",body:JSON.stringify({dia,codigo:proximo})});
+    setGrade(await api(`/api/escalas/${escalas[0].id}/grade`,token));
+  }
+
+  if(carregando) return h(Carregando);
+  if(setores.length===0) return h(EmptyHint,{text:"Nenhum colaborador cadastrado ainda."});
+
+  return h("div",null,
+    h("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:4}},
+      h("h2",{style:{fontSize:16,fontWeight:600}}, grade?`${fmtBR(grade.dias[0])} a ${fmtBR(grade.dias[30])}`:"—"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        setores.map(s=>h("button",{key:s,className:"btn",onClick:()=>setSetorAtivo(s),style:{fontSize:14,padding:"6px 12px",borderRadius:20,border:`1px solid ${s===setorAtivo?teal:line}`,background:s===setorAtivo?teal:"transparent",color:s===setorAtivo?"#fff":ink}},s))
+      )
+    ),
+    !grade ? h(EmptyHint,{text:"Nenhuma escala gerada ainda para este setor."}) :
+    h(React.Fragment,null,
+      h("p",{style:{fontSize:12,marginBottom:16,color:muted,display:"flex",gap:6,alignItems:"center"}},
+        "Responsável: ", h("strong",null,grade.escala.responsavel),
+        !podeEditar(setorAtivo) && h("span",{style:{color:faint}}," 🔒 somente leitura")
+      ),
+      h("div",{style:{borderRadius:8,overflow:"hidden",border:`1px solid ${line}`,background:panel}},
+        h("div",{style:{overflowX:"auto"}},
+          h("table",{style:{fontSize:12,width:"100%"}},
+            h("thead",null, h("tr",null,
+              h("th",{style:{position:"sticky",left:0,textAlign:"left",padding:"8px 12px",background:tealDeep,color:"#fff",minWidth:210}},"Colaborador"),
+              grade.dias.map((dia,i)=>{
+                const wd = new Date(dia+"T00:00:00").getDay();
+                const bg = wd===0?sunday:wd===6?saturday:tealDeep;
+                return h("th",{key:i,style:{padding:"4px 6px",background:bg,color:"#fff",minWidth:30,textAlign:"center",fontWeight:400}},
+                  h("div",{style:{fontSize:9,opacity:.85}},WEEKDAYS[wd]), h("div",{style:{fontFamily:"monospace"}},dia.slice(-2)));
+              })
+            )),
+            h("tbody",null,
+              grade.linhas.map(linha=>{
+                const r = REGIMES[linha.colaborador.regime];
+                return h("tr",{key:linha.alocacaoId,style:{borderTop:`1px solid ${line}`}},
+                  h("td",{style:{position:"sticky",left:0,padding:"6px 12px",background:panel,borderRight:`1px solid ${line}`}},
+                    h("div",{style:{fontWeight:500}},linha.colaborador.nome),
+                    h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo} · ${r.label}`)
+                  ),
+                  grade.dias.map((dia,di)=>{
+                    const code = linha.dias[di];
+                    const wd = new Date(dia+"T00:00:00").getDay(); const weekend = wd===0||wd===6;
+                    let color = faint;
+                    if(code===r.codigo) color=r.cor;
+                    if(code==="FE") color="#8B5CF6";
+                    if(code==="FF") color="#B45309";
+                    return h("td",{key:di,onClick:()=>marcarOverride(linha.alocacaoId,dia,(code==="FE"||code==="FF")?code:null),
+                      style:{textAlign:"center",fontFamily:"monospace",padding:"6px 0",color,fontWeight:code==="F"?400:600,cursor:podeEditar(setorAtivo)?"pointer":"default",background:weekend?(wd===0?sunday+"12":saturday+"12"):"transparent",userSelect:"none"}
+                    },code);
+                  })
+                );
+              })
+            )
+          )
+        )
+      ),
+      h(Legenda)
+    )
+  );
+}
+
+function Legenda(){
+  const items=[{c:amber,l:"PD / PD48 — Diurno"},{c:indigo,l:"PN / PN48 — Noturno"},{c:verde,l:"EXP — Administrativo"},{c:rosa,l:"EXP4 — Parcial"},{c:faint,l:"F — Folga"},{c:"#8B5CF6",l:"FE — Férias"},{c:"#B45309",l:"FF — Folga em feriado"}];
+  return h("div",{style:{marginTop:16,display:"flex",flexWrap:"wrap",gap:"8px 20px",fontSize:12,color:muted}},
+    items.map(it=>h("div",{key:it.l,style:{display:"flex",alignItems:"center",gap:6}}, h("span",{style:{width:9,height:9,background:it.c,display:"inline-block",borderRadius:2}}), it.l))
+  );
+}
+
+// =================================================================== Gestores
+function Gestores({token,colaboradores}){
+  const [gestores,setGestores]=useState([]);
+  const [carregando,setCarregando]=useState(true);
+  const [form,setForm]=useState({nome:"",email:"",senha:"",is_admin:false,setores:[]});
+  const [erro,setErro]=useState(null);
+  const setoresExistentes=[...new Set(colaboradores.map(c=>c.setor))];
+
+  async function recarregar(){ setGestores(await api("/api/gestores",token)); }
+  useEffect(()=>{ recarregar().finally(()=>setCarregando(false)); },[]);
+
+  function toggleSetorForm(s){ setForm(f=>({...f,setores:f.setores.includes(s)?f.setores.filter(x=>x!==s):[...f.setores,s]})); }
+  async function cadastrar(){
+    setErro(null);
+    if(!form.nome.trim()||!form.email.trim()||!form.senha.trim()) return;
+    try{ await api("/api/gestores",token,{method:"POST",body:JSON.stringify(form)}); setForm({nome:"",email:"",senha:"",is_admin:false,setores:[]}); recarregar(); }
+    catch(e){ setErro(e.message); }
+  }
+  async function toggleSetorGestor(g,s){
+    const setores = g.setores.includes(s)?g.setores.filter(x=>x!==s):[...g.setores,s];
+    await api(`/api/gestores/${g.id}/setores`,token,{method:"PATCH",body:JSON.stringify({setores})});
+    recarregar();
+  }
+
+  if(carregando) return h(Carregando);
+
+  return h("div",{style:{display:"grid",gridTemplateColumns:window.innerWidth>1024?"300px 1fr":"1fr",gap:24}},
+    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20,height:"fit-content"}},
+      h("h2",{style:{fontSize:14,fontWeight:600,marginBottom:12}},"Novo gestor"),
+      h("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+        h(Field,{label:"Nome"}, h(Input,{value:form.nome,onChange:e=>setForm(f=>({...f,nome:e.target.value}))})),
+        h(Field,{label:"Email"}, h(Input,{value:form.email,onChange:e=>setForm(f=>({...f,email:e.target.value}))})),
+        h(Field,{label:"Senha temporária"}, h(Input,{type:"password",value:form.senha,onChange:e=>setForm(f=>({...f,senha:e.target.value}))})),
+        h("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:14}}, h("input",{type:"checkbox",checked:form.is_admin,onChange:e=>setForm(f=>({...f,is_admin:e.target.checked}))}), "Administrador (acesso total)"),
+        !form.is_admin && h(Field,{label:"Setores sob responsabilidade"},
+          h("div",{style:{display:"flex",flexDirection:"column",gap:6,marginTop:4}},
+            setoresExistentes.map(s=>h("label",{key:s,style:{display:"flex",alignItems:"center",gap:8,fontSize:14}}, h("input",{type:"checkbox",checked:form.setores.includes(s),onChange:()=>toggleSetorForm(s)}), s))
+          )
+        ),
+        erro && h("p",{style:{fontSize:12,color:danger}},erro),
+        h(Button,{primary:true,onClick:cadastrar},"+ Cadastrar gestor")
+      )
+    ),
+    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,overflow:"hidden"}},
+      h("table",{style:{width:"100%",fontSize:14}},
+        h("thead",null, h("tr",{style:{background:"#F1F4F3"}}, h("th",{style:{textAlign:"left",padding:"8px 16px",color:muted}},"Gestor"), h("th",{style:{textAlign:"left",padding:"8px 16px",color:muted}},"Setores editáveis"))),
+        h("tbody",null,
+          gestores.map(g=>h("tr",{key:g.id,style:{borderTop:`1px solid ${line}`}},
+            h("td",{style:{padding:"10px 16px"}},
+              h("div",{style:{fontWeight:500}}, g.nome, g.is_admin && h("span",{style:{marginLeft:6,fontSize:10,padding:"2px 6px",borderRadius:10,background:teal+"1A",color:teal}},"ADMIN")),
+              h("div",{style:{fontSize:12,color:faint}},g.email)
+            ),
+            h("td",{style:{padding:"10px 16px"}},
+              g.is_admin ? h("span",{style:{fontSize:12,color:faint}},"todos") :
+              h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
+                setoresExistentes.map(s=>{
+                  const ativo=g.setores.includes(s);
+                  return h("button",{key:s,className:"btn",onClick:()=>toggleSetorGestor(g,s),style:{fontSize:12,padding:"4px 8px",borderRadius:20,border:`1px solid ${ativo?teal:line}`,background:ativo?teal:"transparent",color:ativo?"#fff":muted}},s);
+                })
+              )
+            )
+          ))
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body>
+</html>

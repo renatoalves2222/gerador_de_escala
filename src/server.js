@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
@@ -10,6 +11,7 @@ const { REGIMES, precisaConfiguracao, codigoDoDia } = require("./regimes");
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "..", "public")));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 const JWT_SECRET = process.env.JWT_SECRET || "troque-este-segredo-em-producao";
@@ -320,6 +322,9 @@ app.put("/api/alocacoes/:id/override", autenticar, async (req, res) => {
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// qualquer rota que não seja /api/* devolve o frontend (single-page app)
+app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
 
 initSchema()
   .then(async () => {

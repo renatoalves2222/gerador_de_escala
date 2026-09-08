@@ -33,7 +33,7 @@ const GRUPO_ORDEM = ["impar", "par"];
 function fmtBR(iso) { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
 function gerarPdfEscala({ escala, dias, linhas }, res) {
-  const colNome = 140, colCargo = 100, colHorario = 62, colDia = 20, colAssinatura = 90;
+  const colNome = 140, colCargo = 100, colHorario = 62, colDia = 20, colAssinatura = 190;
   const nDias = dias.length;
   const larguraGrade = nDias * colDia;
   const larguraTabela = colNome + colCargo + colHorario + larguraGrade + colAssinatura;

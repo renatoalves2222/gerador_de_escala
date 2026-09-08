@@ -220,10 +220,10 @@ app.post("/api/escalas", autenticar, ah(async (req, res) => {
   const setorU = setor.toUpperCase();
   if (!podeEditarSetor(req.gestor, setorU)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
-  // ciclo padrão da unidade: sempre do dia 21 ao dia 20 do mês seguinte (30 dias)
-  const fim = new Date(inicio + "T00:00:00");
-  fim.setDate(fim.getDate() + 29);
-  const fimISO = fim.toISOString().slice(0, 10);
+  // ciclo padrão da unidade: sempre do dia 21 ao dia 20 do mês seguinte (varia 28-31 dias conforme o mês)
+  const [anoIni, mesIni] = inicio.split("-").map(Number);
+  const fim = new Date(anoIni, mesIni, 20); // mesIni já é o mês seguinte (0-indexed = mês atual)
+  const fimISO = `${fim.getFullYear()}-${String(fim.getMonth() + 1).padStart(2, "0")}-${String(fim.getDate()).padStart(2, "0")}`;
 
   const { rows: doSetor } = await pool.query("SELECT * FROM colaboradores WHERE setor = $1 AND situacao = 'A'", [setorU]);
   const excluidosSet = new Set(excluidos || []);

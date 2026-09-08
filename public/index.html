@@ -42,6 +42,7 @@ const precisaCiclo = r => r==="doze48Diurno"||r==="doze48Noturno";
 const WEEKDAYS = ["DOM","SEG","TER","QUA","QUI","SEX","SÁB"];
 const fmtBR = iso => { const [y,m,d]=iso.split("-"); return `${d}/${m}`; };
 const addDaysISO = (iso,n) => { const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const fimDoCiclo = (iso) => { const [ano,mes] = iso.split("-").map(Number); const f = new Date(ano, mes, 20); return `${f.getFullYear()}-${String(f.getMonth()+1).padStart(2,"0")}-${String(f.getDate()).padStart(2,"0")}`; };
 
 async function api(path, token, opts={}) {
   const res = await fetch(path, {
@@ -295,7 +296,7 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
   return h("div",{style:{display:"grid",gridTemplateColumns:window.innerWidth>1024?"280px 1fr":"1fr",gap:24}},
     h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20,display:"flex",flexDirection:"column",gap:16,height:"fit-content"}},
       h(Field,{label:"Início do ciclo"}, h(Input,{type:"date",value:inicio,onChange:e=>setInicio(e.target.value)})),
-      h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(addDaysISO(inicio,29)))),
+      h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(fimDoCiclo(inicio)))),
       Number(inicio.slice(-2))!==21 && h("p",{style:{fontSize:11,color:"#D98B2B"}},"⚠ O ciclo da unidade sempre começa no dia 21. Confira a data."),
       h(Field,{label:"Setor"}, h(Select,{value:setor,onChange:e=>{setSetor(e.target.value);setExcluidos({});setResultado(null);}},
         h("option",{value:""},"Selecione…"), setoresProprios.map(s=>h("option",{key:s,value:s},s)))),

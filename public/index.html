@@ -260,8 +260,15 @@ function ConfigInline({colaborador,onSalvar}){
 }
 
 // =============================================================== NovaEscala
+function proximoDia21(){
+  const hoje = new Date();
+  const ano = hoje.getFullYear(), mes = hoje.getMonth(), dia = hoje.getDate();
+  const base = dia <= 20 ? new Date(ano, mes, 21) : new Date(ano, mes + 1, 21);
+  return base.toISOString().slice(0,10);
+}
+
 function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
-  const [inicio,setInicio]=useState(new Date().toISOString().slice(0,10));
+  const [inicio,setInicio]=useState(proximoDia21());
   const [setor,setSetor]=useState("");
   const [responsavel,setResponsavel]=useState("");
   const [excluidos,setExcluidos]=useState({});
@@ -288,7 +295,8 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
   return h("div",{style:{display:"grid",gridTemplateColumns:window.innerWidth>1024?"280px 1fr":"1fr",gap:24}},
     h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:20,display:"flex",flexDirection:"column",gap:16,height:"fit-content"}},
       h(Field,{label:"Início do ciclo"}, h(Input,{type:"date",value:inicio,onChange:e=>setInicio(e.target.value)})),
-      h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(addDaysISO(inicio,30)))),
+      h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(addDaysISO(inicio,29)))),
+      Number(inicio.slice(-2))!==21 && h("p",{style:{fontSize:11,color:"#D98B2B"}},"⚠ O ciclo da unidade sempre começa no dia 21. Confira a data."),
       h(Field,{label:"Setor"}, h(Select,{value:setor,onChange:e=>{setSetor(e.target.value);setExcluidos({});setResultado(null);}},
         h("option",{value:""},"Selecione…"), setoresProprios.map(s=>h("option",{key:s,value:s},s)))),
       setoresProprios.length===0 && h("p",{style:{fontSize:12,color:danger}},"Você não é responsável por nenhum setor com colaboradores."),

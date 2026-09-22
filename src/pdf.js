@@ -78,9 +78,15 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   doc.rect(x0, y, larguraTabela, alturaTopo).stroke(COR_BORDA);
   doc.rect(x0, y, largLogoEsq, alturaTopo).stroke(COR_BORDA);
   doc.rect(x0 + larguraTabela - largLogoDir, y, largLogoDir, alturaTopo).stroke(COR_BORDA);
+  // logos da esquerda empilhados: prefeitura em cima, ASELC em baixo
+  const alturaMeioLogoEsq = alturaTopo / 2;
   try {
-    doc.image(LOGO_BELEM, x0 + 5, y + 12, { fit: [66, 30] });
-    doc.image(LOGO_ASELC, x0 + 82, y + 10, { fit: [62, 34] });
+    const largBelem = 70, altBelem = 32;
+    doc.image(LOGO_BELEM, x0 + (largLogoEsq - largBelem) / 2, y + (alturaMeioLogoEsq - altBelem) / 2, { fit: [largBelem, altBelem] });
+  } catch (e) { /* segue sem logo se o arquivo não existir */ }
+  try {
+    const largAselc = 62, altAselc = 32;
+    doc.image(LOGO_ASELC, x0 + (largLogoEsq - largAselc) / 2, y + alturaMeioLogoEsq + (alturaMeioLogoEsq - altAselc) / 2, { fit: [largAselc, altAselc] });
   } catch (e) { /* segue sem logo se o arquivo não existir */ }
   try { doc.image(LOGO_UPA, x0 + larguraTabela - largLogoDir + 8, y + 8, { fit: [largLogoDir - 16, alturaTopo - 16] }); } catch (e) {}
 

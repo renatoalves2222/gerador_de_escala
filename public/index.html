@@ -217,30 +217,37 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
         importMsg && h("p",{style:{fontSize:12,marginTop:12,color:importMsg.ok?teal:danger}},importMsg.texto)
       )
     ),
-    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,overflow:"hidden"}},
-      h("table",{style:{width:"100%",fontSize:14}},
-        h("thead",null, h("tr",{style:{background:"#F1F4F3"}}, ["Nome","Setor","Cargo","Regime","Config.",""].map(hd=>h("th",{key:hd,style:{textAlign:"left",padding:"8px 16px",fontWeight:500,color:muted}},hd)))),
+    h("div",{style:{background:panel,border:`1px solid ${line}`,borderRadius:8,overflow:"hidden",minWidth:0}},
+      h("div",{style:{overflowX:"auto"}},
+      h("table",{style:{width:"100%",tableLayout:"fixed",fontSize:14}},
+        h("colgroup",null,
+          h("col",{style:{width:"26%"}}), h("col",{style:{width:"15%"}}), h("col",{style:{width:"20%"}}),
+          h("col",{style:{width:"20%"}}), h("col",{style:{width:"11%"}}), h("col",{style:{width:48}})
+        ),
+        h("thead",null, h("tr",{style:{background:"#F1F4F3"}}, ["Nome","Setor","Cargo","Regime","Config.",""].map(hd=>h("th",{key:hd,style:{textAlign:"left",padding:"8px 16px",fontWeight:500,color:muted,whiteSpace:"nowrap"}},hd)))),
         h("tbody",null,
           colaboradores.length===0 && h("tr",null, h("td",{colSpan:6,style:{textAlign:"center",padding:24,color:faint}},"Nenhum colaborador cadastrado ainda.")),
           colaboradores.map(c=>{
             const r = REGIMES[c.regime];
             const editavel = podeEditar(c.setor);
+            const truncar = {overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"};
             return h("tr",{key:c.id,style:{borderTop:`1px solid ${line}`,opacity:c.situacao==="A"?1:0.5}},
               h("td",{style:{padding:"10px 16px",fontWeight:500}}, c.nome, c.situacao!=="A" && h("span",{style:{marginLeft:6,fontSize:10,color:danger}},"INATIVO")),
-              h("td",{style:{padding:"10px 16px",color:muted}},c.setor),
-              h("td",{style:{padding:"10px 16px",color:muted}},c.cargo),
-              h("td",{style:{padding:"10px 16px"}}, h("span",{style:{fontSize:12,padding:"2px 8px",borderRadius:10,background:r.cor+"1A",color:r.cor}},r.label)),
+              h("td",{style:{padding:"10px 16px",color:muted,...truncar},title:c.setor},c.setor),
+              h("td",{style:{padding:"10px 16px",color:muted,...truncar},title:c.cargo},c.cargo),
+              h("td",{style:{padding:"10px 16px"}}, h("span",{style:{fontSize:12,padding:"2px 8px",borderRadius:10,background:r.cor+"1A",color:r.cor,display:"inline-block",maxWidth:"100%",...truncar},title:r.label},r.label)),
               h("td",{style:{padding:"10px 16px"}},
                 (editavel && c.situacao==="A") ? h(ConfigInline,{colaborador:c,onSalvar:patch=>salvarConfig(c,patch)}) :
                 c.precisaConfiguracao ? h("span",{style:{fontSize:10,color:danger}},"⚠ pendente") :
                 h("span",{style:{fontSize:12,color:faint}}, c.grupo || c.ciclo_inicio || "—")
               ),
-              h("td",{style:{padding:"10px 16px",textAlign:"right"}},
+              h("td",{style:{padding:"10px 16px",textAlign:"right",whiteSpace:"nowrap"}},
                 editavel ? h("button",{className:"btn",onClick:()=>remover(c.id),style:{color:danger},title:"Remover"},"🗑") : h("span",{style:{color:faint}},"🔒")
               )
             );
           })
         )
+      )
       )
     )
   );

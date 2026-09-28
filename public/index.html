@@ -44,6 +44,23 @@ const fmtBR = iso => { const [y,m,d]=iso.split("-"); return `${d}/${m}`; };
 const addDaysISO = (iso,n) => { const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
 const fimDoCiclo = (iso) => { const [ano,mes] = iso.split("-").map(Number); const f = new Date(ano, mes, 20); return `${f.getFullYear()}-${String(f.getMonth()+1).padStart(2,"0")}-${String(f.getDate()).padStart(2,"0")}`; };
 
+// ---- 12x36: par/ímpar relativo ao mês de início da escala (mesma regra do servidor)
+const MESES_ABREV = ["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+const nomeEscala = (inicioISO) => { const [a,m] = inicioISO.split("-").map(Number); return MESES_ABREV[m % 12] + "/" + (m===12?a+1:a); }; // escala leva o nome do mês em que termina
+const REF_PADRAO_PARIDADE = "2026-04-21";
+function trabalha12x36(c, iso){
+  const ref = new Date((c.grupo_ref||REF_PADRAO_PARIDADE)+"T00:00:00");
+  if ((ref.getDate()%2===0) !== (c.grupo==="par")) ref.setDate(ref.getDate()+1);
+  const diff = Math.round((new Date(iso+"T00:00:00") - ref)/86400000);
+  return ((diff%2)+2)%2===0;
+}
+function grupoNaEscala(c, inicioISO){
+  if(!c.grupo) return null;
+  const dia = Number(inicioISO.slice(-2)) + (trabalha12x36(c,inicioISO)?0:1);
+  return dia%2===0 ? "par" : "impar";
+}
+const rotuloGrupo = g => g==="par"?"Par":g==="impar"?"Ímpar":"—";
+
 async function api(path, token, opts={}) {
   const res = await fetch(path, {
     ...opts,
@@ -171,6 +188,7 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
       await api("/api/colaboradores",token,{method:"POST",body:JSON.stringify({
         nome:form.nome, setor:setorU, cargo:form.cargo, regime:form.regime,
         grupo: precisaParidade(form.regime)?form.grupo:null,
+        grupo_ref: precisaParidade(form.regime)?proximoDia21():null,
         ciclo_inicio: precisaCiclo(form.regime)?form.ciclo_inicio:null,
       })});
       setForm({nome:"",setor:"",cargo:"",regime:"doze36Diurno",grupo:"par",ciclo_inicio:""});
@@ -203,7 +221,7 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
           h(Field,{label:"Setor"}, h(Input,{value:form.setor,placeholder:"Ex: RECEPCAO",onChange:e=>setForm(f=>({...f,setor:e.target.value}))})),
           h(Field,{label:"Cargo"}, h(Input,{value:form.cargo,onChange:e=>setForm(f=>({...f,cargo:e.target.value}))})),
           h(Field,{label:"Regime"}, h(Select,{value:form.regime,onChange:e=>setForm(f=>({...f,regime:e.target.value}))}, REGIME_ORDEM.map(k=>h("option",{key:k,value:k},REGIMES[k].label)))),
-          precisaParidade(form.regime) && h(Field,{label:"Grupo"}, h(Select,{value:form.grupo,onChange:e=>setForm(f=>({...f,grupo:e.target.value}))}, h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar"))),
+          precisaParidade(form.regime) && h(Field,{label:`Grupo na escala ${nomeEscala(proximoDia21())}`}, h(Select,{value:form.grupo,onChange:e=>setForm(f=>({...f,grupo:e.target.value}))}, h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar"))),
           precisaCiclo(form.regime) && h(Field,{label:"Início do ciclo (1º dia de trabalho)"}, h(Input,{type:"date",value:form.ciclo_inicio,onChange:e=>setForm(f=>({...f,ciclo_inicio:e.target.value}))})),
           erro && h("p",{style:{fontSize:12,color:danger}},erro),
           h(Button,{primary:true,onClick:cadastrar},"+ Cadastrar")
@@ -239,7 +257,7 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
               h("td",{style:{padding:"10px 16px"}},
                 (editavel && c.situacao==="A") ? h(ConfigInline,{colaborador:c,onSalvar:patch=>salvarConfig(c,patch)}) :
                 c.precisaConfiguracao ? h("span",{style:{fontSize:10,color:danger}},"⚠ pendente") :
-                h("span",{style:{fontSize:12,color:faint}}, c.grupo || c.ciclo_inicio || "—")
+                h("span",{style:{fontSize:12,color:faint}}, precisaParidade(c.regime) ? `${rotuloGrupo(grupoNaEscala(c,proximoDia21()))} (${nomeEscala(proximoDia21())})` : (c.ciclo_inicio || "—"))
               ),
               h("td",{style:{padding:"10px 16px",textAlign:"right",whiteSpace:"nowrap"}},
                 editavel ? h("button",{className:"btn",onClick:()=>remover(c.id),style:{color:danger},title:"Remover"},"🗑") : h("span",{style:{color:faint}},"🔒")
@@ -254,12 +272,15 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
 }
 
 function ConfigInline({colaborador,onSalvar}){
-  const [grupo,setGrupo]=useState(colaborador.grupo||"par");
+  const ref = proximoDia21();
+  const [grupo,setGrupo]=useState(grupoNaEscala(colaborador,ref)||"par");
   const [ciclo,setCiclo]=useState(colaborador.ciclo_inicio||"");
   const corBorda = colaborador.precisaConfiguracao ? danger : line;
   if (precisaParidade(colaborador.regime)){
-    return h("select",{value:grupo,onChange:e=>{setGrupo(e.target.value);onSalvar({grupo:e.target.value});},style:{fontSize:12,border:`1px solid ${corBorda}`,borderRadius:4,padding:"4px 6px"}},
-      h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar"));
+    return h("div",{style:{display:"flex",flexDirection:"column",gap:2}},
+      h("select",{value:grupo,onChange:e=>{setGrupo(e.target.value);onSalvar({grupo:e.target.value,grupo_ref:ref});},style:{fontSize:12,border:`1px solid ${corBorda}`,borderRadius:4,padding:"4px 6px"}},
+        h("option",{value:"par"},"Par"), h("option",{value:"impar"},"Ímpar")),
+      h("span",{style:{fontSize:10,color:faint}},`escala ${nomeEscala(ref)}`));
   }
   if (precisaCiclo(colaborador.regime)){
     return h("input",{type:"date",value:ciclo,onChange:e=>{setCiclo(e.target.value);onSalvar({ciclo_inicio:e.target.value});},style:{fontSize:12,border:`1px solid ${corBorda}`,borderRadius:4,padding:"4px 6px"}});
@@ -325,6 +346,7 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
                 style:{display:"flex",alignItems:"center",gap:8,textAlign:"left",fontSize:14,padding:"8px 12px",borderRadius:6,border:`1px solid ${incluido?r.cor:line}`,background:incluido?r.cor+"12":"transparent"}},
                 h("span",{style:{width:16,height:16,borderRadius:3,background:incluido?r.cor:"#EDEFEE",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,flexShrink:0}}, incluido?"✓":""),
                 h("span",{style:{flex:1}},c.nome),
+                !bloqueado && precisaParidade(c.regime) && h("span",{style:{fontSize:10,color:r.cor,fontWeight:600}},rotuloGrupo(grupoNaEscala(c,inicio)).toUpperCase()),
                 bloqueado && h("span",{style:{fontSize:10,color:danger}},"⚠ falta configurar")
               );
             })
@@ -453,7 +475,7 @@ function VisaoEscala({token,gestor,podeEditar}){
             return h("tr",{key:linha.alocacaoId,style:{borderTop:`1px solid ${line}`}},
               h("td",{style:{position:"sticky",left:0,padding:"6px 12px",background:panel,borderRight:`1px solid ${line}`}},
                 h("div",{style:{fontWeight:500}},linha.colaborador.nome),
-                h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo} · ${r.label}`)
+                h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo} · ${r.label}${linha.colaborador.grupo&&precisaParidade(linha.colaborador.regime)?" "+rotuloGrupo(linha.colaborador.grupo):""}`)
               ),
               grade.dias.map((dia,di)=>{
                 const code = linha.dias[di];

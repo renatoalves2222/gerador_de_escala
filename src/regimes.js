@@ -35,21 +35,72 @@ function diffDias(a, b) {
   return Math.round((a.getTime() - b.getTime()) / 86400000);
 }
 
+function isoParaData(iso) {
+  return new Date(iso + "T00:00:00");
+}
+
+// Início (dia 21) do ciclo que contém a data informada.
+function inicioDoCiclo(dataISO) {
+  const [ano, mes, dia] = dataISO.split("-").map(Number);
+  const d = dia >= 21 ? new Date(ano, mes - 1, 21) : new Date(ano, mes - 2, 21);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-21`;
+}
+
+// ---------------------------------------------------------------- 12x36
+// REGRA: "Par"/"Ímpar" vale para o MÊS DE INÍCIO da escala de referência
+// (colaboradores.grupo_ref = dia 21 daquela escala). Dali em diante o plantão
+// alterna dia sim / dia não SEM quebra, atravessando meses e escalas.
+// Consequência: quando o mês de início tem 31 dias (31 e 1 são ambos ímpares),
+// quem era "par" passa a ser "ímpar" na escala seguinte e vice-versa — mas
+// nunca há dois plantões seguidos nem duas folgas seguidas.
+const REF_PADRAO_PARIDADE = "2026-04-21";
+
+// Primeiro dia de trabalho do colaborador a partir da referência (âncora fixa).
+function ancoraParidade(colaborador) {
+  const ref = isoParaData(colaborador.grupo_ref || REF_PADRAO_PARIDADE);
+  const refEhPar = ref.getDate() % 2 === 0;
+  const querPar = colaborador.grupo === "par";
+  if (refEhPar === querPar) return ref;
+  const d = new Date(ref);
+  d.setDate(d.getDate() + 1);
+  return d;
+}
+
+function trabalhaNoDia12x36(colaborador, dataISO) {
+  const diff = diffDias(isoParaData(dataISO), ancoraParidade(colaborador));
+  return ((diff % 2) + 2) % 2 === 0;
+}
+
+// Rótulo (par/impar) do colaborador numa escala: paridade dos dias que ele
+// trabalha no mês de início dessa escala.
+function grupoNaEscala(colaborador, inicioEscalaISO) {
+  if (!colaborador.grupo) return null;
+  const ini = isoParaData(inicioEscalaISO);
+  const trabalhaNoInicio = trabalhaNoDia12x36(colaborador, inicioEscalaISO);
+  const diaTrabalho = trabalhaNoInicio ? ini.getDate() : ini.getDate() + 1;
+  return diaTrabalho % 2 === 0 ? "par" : "impar";
+}
+
+// Converte um "par/impar" escolhido para a escala que começa em inicioEscalaISO
+// no grupo equivalente para outra referência (usado ao salvar/exibir).
+function grupoRelativo(grupo, refOrigemISO, refDestinoISO) {
+  return grupoNaEscala({ grupo, grupo_ref: refOrigemISO }, refDestinoISO);
+}
+
 // codigoDoDia: retorna o código (PD/PN/EXP/F/...) de um colaborador numa data específica.
 function codigoDoDia(colaborador, dataISO, override) {
   if (override) return override;
   const r = REGIMES[colaborador.regime];
   if (!r) return "F";
-  const data = new Date(dataISO + "T00:00:00");
+  const data = isoParaData(dataISO);
 
   if (r.tipo === "paridade") {
-    const isEven = data.getDate() % 2 === 0;
-    const trabalha = colaborador.grupo === "par" ? isEven : !isEven;
-    return trabalha ? r.codigo : "F";
+    if (!colaborador.grupo) return "F";
+    return trabalhaNoDia12x36(colaborador, dataISO) ? r.codigo : "F";
   }
   if (r.tipo === "ciclo48") {
     if (!colaborador.ciclo_inicio) return "F";
-    const ref = new Date(colaborador.ciclo_inicio + "T00:00:00");
+    const ref = isoParaData(colaborador.ciclo_inicio);
     const mod = ((diffDias(data, ref) % 3) + 3) % 3;
     return mod === 0 ? r.codigo : "F";
   }
@@ -60,4 +111,4 @@ function codigoDoDia(colaborador, dataISO, override) {
   return "F";
 }
 
-module.exports = { REGIMES, mapRegime, precisaConfiguracao, codigoDoDia };
+module.exports = { REGIMES, mapRegime, precisaConfiguracao, codigoDoDia, grupoNaEscala, grupoRelativo, inicioDoCiclo };

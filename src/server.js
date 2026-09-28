@@ -6,7 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { pool, initSchema } = require("./db");
 const { parsePlanilha } = require("./importer");
-const { REGIMES, precisaConfiguracao, codigoDoDia } = require("./regimes");
+const { REGIMES, precisaConfiguracao, codigoDoDia, grupoNaEscala } = require("./regimes");
 const { gerarPdfEscala } = require("./pdf");
 
 const app = express();
@@ -105,15 +105,15 @@ app.get("/api/colaboradores", autenticar, ah(async (req, res) => {
 }));
 
 app.post("/api/colaboradores", autenticar, ah(async (req, res) => {
-  const { nome, setor, cargo, regime, grupo, ciclo_inicio } = req.body || {};
+  const { nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio } = req.body || {};
   if (!nome || !setor || !cargo || !regime) return res.status(400).json({ erro: "Nome, setor, cargo e regime são obrigatórios." });
   const setorU = setor.toUpperCase();
   if (!podeEditarSetor(req.gestor, setorU)) return res.status(403).json({ erro: `Você não é responsável por ${setorU}.` });
   if (!REGIMES[regime]) return res.status(400).json({ erro: "Regime inválido." });
   const { rows } = await pool.query(
-    `INSERT INTO colaboradores (nome, setor, cargo, regime, grupo, ciclo_inicio, situacao)
-     VALUES ($1,$2,$3,$4,$5,$6,'A') RETURNING *`,
-    [nome.toUpperCase(), setorU, cargo.toUpperCase(), regime, grupo || null, ciclo_inicio || null]
+    `INSERT INTO colaboradores (nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio, situacao)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'A') RETURNING *`,
+    [nome.toUpperCase(), setorU, cargo.toUpperCase(), regime, grupo || null, grupo ? (grupo_ref || null) : null, ciclo_inicio || null]
   );
   res.status(201).json(rows[0]);
 }));
@@ -125,7 +125,7 @@ app.patch("/api/colaboradores/:id", autenticar, ah(async (req, res) => {
   if (!atual) return res.status(404).json({ erro: "Colaborador não encontrado." });
   if (!podeEditarSetor(req.gestor, atual.setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
-  const campos = ["nome", "cargo", "grupo", "ciclo_inicio", "situacao"];
+  const campos = ["nome", "cargo", "grupo", "grupo_ref", "ciclo_inicio", "situacao"];
   const sets = [];
   const valores = [];
   campos.forEach((campo) => {
@@ -312,7 +312,11 @@ async function montarGrade(escalaId) {
 
   const linhas = alocacoes.map((a) => ({
     alocacaoId: a.alocacao_id,
-    colaborador: { id: a.id, nome: a.nome, cargo: a.cargo, regime: a.regime, grupo: a.grupo },
+    colaborador: {
+      id: a.id, nome: a.nome, cargo: a.cargo, regime: a.regime,
+      // par/ímpar relativo ao mês de início DESTA escala (inverte após mês de 31 dias)
+      grupo: REGIMES[a.regime] && REGIMES[a.regime].tipo === "paridade" ? grupoNaEscala(a, escala.inicio) : a.grupo,
+    },
     dias: dias.map((dia) => codigoDoDia(a, dia, overrideMap[`${a.alocacao_id}|${dia}`])),
   }));
 

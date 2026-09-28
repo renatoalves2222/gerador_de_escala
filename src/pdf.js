@@ -21,14 +21,14 @@ const REGIME_TITULO = {
   parcial4h: "PARCIAL",
 };
 function tituloGrupo(regime, grupo) {
-  if (regime === "doze36Diurno") return grupo === "par" ? "DIURNO 02" : "DIURNO 01";
-  if (regime === "doze36Noturno") return grupo === "par" ? "NOTURNO 02" : "NOTURNO 01";
+  if (regime === "doze36Diurno") return grupo === "par" ? "DIURNO PAR" : "DIURNO ÍMPAR";
+  if (regime === "doze36Noturno") return grupo === "par" ? "NOTURNO PAR" : "NOTURNO ÍMPAR";
   if (regime === "doze48Diurno") return "DIURNO 12x48";
   if (regime === "doze48Noturno") return "NOTURNO 12x48";
   return REGIME_TITULO[regime] || regime;
 }
 const REGIME_ORDEM = ["doze36Diurno","doze36Noturno","doze48Diurno","doze48Noturno","administrativo","parcial4h"];
-const GRUPO_ORDEM = ["impar", "par"];
+const GRUPO_ORDEM = ["par", "impar"];
 
 function fmtBR(iso) { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; }
 

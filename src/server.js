@@ -66,6 +66,37 @@ app.post("/api/auth/login", ah(async (req, res) => {
 app.get("/api/me", autenticar, (req, res) => res.json(req.gestor));
 
 // ------------------------------------------------------------ gestores
+// lança (ou remove) um código — ex.: FE (férias) — em todos os dias de um período, de uma vez
+app.put("/api/alocacoes/:id/periodo", autenticar, ah(async (req, res) => {
+  const { inicio, fim, codigo } = req.body || {};
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(inicio || "") || !iso.test(fim || "")) return res.status(400).json({ erro: "Informe início e fim (YYYY-MM-DD)." });
+  if (fim < inicio) return res.status(400).json({ erro: "A data final deve ser igual ou posterior à inicial." });
+  if (codigo && !["FE", "FF"].includes(codigo)) return res.status(400).json({ erro: "Código inválido." });
+  const { rows: aloc } = await pool.query(
+    `SELECT a.id, e.setor, e.inicio, e.fim FROM alocacoes a JOIN escalas e ON e.id = a.escala_id WHERE a.id = $1`,
+    [req.params.id]
+  );
+  if (!aloc[0]) return res.status(404).json({ erro: "Alocação não encontrada." });
+  if (!podeEditarSetor(req.gestor, aloc[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+
+  // limita o período às datas desta escala (21 a 20)
+  const de = inicio < aloc[0].inicio ? aloc[0].inicio : inicio;
+  const ate = fim > aloc[0].fim ? aloc[0].fim : fim;
+  if (ate < de) return res.status(400).json({ erro: "O período informado não cai dentro desta escala." });
+
+  if (!codigo) {
+    await pool.query("DELETE FROM overrides WHERE alocacao_id = $1 AND dia BETWEEN $2 AND $3 AND codigo = 'FE'", [req.params.id, de, ate]);
+  } else {
+    await pool.query(
+      `INSERT INTO overrides (alocacao_id, dia, codigo)
+       SELECT $1, d::date, $4 FROM generate_series($2::date, $3::date, interval '1 day') AS d
+       ON CONFLICT (alocacao_id, dia) DO UPDATE SET codigo = EXCLUDED.codigo`,
+      [req.params.id, de, ate, codigo]
+    );
+  }
+  res.json({ inicio: de, fim: ate });
+}));
 app.get("/api/gestores", autenticar, exigirAdmin, ah(async (req, res) => {
   const { rows } = await pool.query("SELECT id, nome, email, is_admin, setores, criado_em FROM gestores ORDER BY nome");
   res.json(rows);

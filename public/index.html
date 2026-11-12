@@ -371,6 +371,10 @@ function VisaoEscala({token,gestor,podeEditar}){
   const [excluindo,setExcluindo]=useState(false);
   const [modo,setModo]=useState("grade"); // grade | dia
   const [exportando,setExportando]=useState(false);
+  const [painelFerias,setPainelFerias]=useState(false);
+  const [ferias,setFerias]=useState({alocacaoId:"",inicio:"",fim:""});
+  const [salvandoFerias,setSalvandoFerias]=useState(false);
+  const [msgFerias,setMsgFerias]=useState(null);
 
   useEffect(()=>{ api("/api/setores",token).then(s=>{ setSetores(s); if(s[0]) setSetorAtivo(s[0]); }).finally(()=>setCarregando(false)); },[]);
   useEffect(()=>{
@@ -393,7 +397,28 @@ function VisaoEscala({token,gestor,podeEditar}){
     await api(`/api/alocacoes/${alocacaoId}/override`,token,{method:"PUT",body:JSON.stringify({dia,codigo:proximo})});
     setGrade(await api(`/api/escalas/${escalaId}/grade`,token));
   }
+  function abrirPainelFerias(){
+    setMsgFerias(null);
+    setFerias({alocacaoId:"",inicio:grade.escala.inicio,fim:grade.escala.fim});
+    setPainelFerias(p=>!p);
+  }
 
+  async function aplicarFerias(remover){
+    setMsgFerias(null);
+    if(!ferias.alocacaoId) return setMsgFerias({erro:true,t:"Escolha o colaborador."});
+    if(!ferias.inicio||!ferias.fim) return setMsgFerias({erro:true,t:"Informe as datas de início e fim."});
+    if(ferias.fim<ferias.inicio) return setMsgFerias({erro:true,t:"A data final deve ser igual ou posterior à inicial."});
+    const nome = (grade.linhas.find(l=>l.alocacaoId===ferias.alocacaoId)||{colaborador:{nome:""}}).colaborador.nome;
+    if(remover && !window.confirm(`Remover as marcações de férias de ${nome} entre ${fmtBR(ferias.inicio)} e ${fmtBR(ferias.fim)}?`)) return;
+    setSalvandoFerias(true);
+    try{
+      const r = await api(`/api/alocacoes/${ferias.alocacaoId}/periodo`,token,{method:"PUT",body:JSON.stringify({inicio:ferias.inicio,fim:ferias.fim,codigo:remover?null:"FE"})});
+      setGrade(await api(`/api/escalas/${escalaId}/grade`,token));
+      const ajustado = r && (r.inicio!==ferias.inicio || r.fim!==ferias.fim);
+      setMsgFerias({erro:false,t:`${remover?"Férias removidas":"Férias lançadas"} para ${nome}: ${fmtBR(r.inicio)} a ${fmtBR(r.fim)}.`+(ajustado?" (Período ajustado às datas desta escala — lance o restante na escala seguinte.)":"")});
+    } catch(e){ setMsgFerias({erro:true,t:e.message||"Não foi possível salvar."}); }
+    finally{ setSalvandoFerias(false); }
+  }
   async function excluirEscala(){
     if(!escalaId || !window.confirm("Excluir esta escala? Essa ação não pode ser desfeita.")) return;
     setExcluindo(true);
@@ -453,6 +478,7 @@ function VisaoEscala({token,gestor,podeEditar}){
         h("button",{className:"btn",onClick:()=>setModo("dia"),style:{fontSize:12,padding:"6px 10px",background:modo==="dia"?teal:panel,color:modo==="dia"?"#fff":muted}},"Por dia")
       ),
       h(Button,{onClick:exportarPdf,disabled:exportando,style:{padding:"4px 10px",fontSize:12}}, exportando?h(Spinner):null," Exportar PDF"),
+            podeEditar(setorAtivo) && h(Button,{onClick:abrirPainelFerias,style:{padding:"4px 10px",fontSize:12,color:"#8B5CF6",borderColor:painelFerias?"#8B5CF6":line}}, "🏖 Lançar férias"),
       podeEditar(setorAtivo) && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
     )
   );
@@ -524,7 +550,28 @@ function VisaoEscala({token,gestor,podeEditar}){
     })
   );
 
-  return h("div",null, header, seletorPeriodos, linhaResponsavel, modo==="grade"?tabela:porDia, h(Legenda));
+  const painel = painelFerias && podeEditar(setorAtivo) && h("div",{style:{background:panel,border:"1px solid #8B5CF6",borderRadius:8,padding:16,marginBottom:12}},
+    h("div",{style:{fontSize:14,fontWeight:600,marginBottom:4,color:"#8B5CF6"}},"Lançar período de férias"),
+    h("p",{style:{fontSize:12,color:muted,margin:"0 0 12px"}},`Marca FE em todos os dias do período, dentro desta escala (${fmtBR(grade.escala.inicio)} a ${fmtBR(grade.escala.fim)}). Dias isolados continuam podendo ser ajustados clicando na célula.`),
+    h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12,alignItems:"end"}},
+      h(Field,{label:"Colaborador"},
+        h(Select,{value:ferias.alocacaoId,onChange:e=>setFerias(f=>({...f,alocacaoId:e.target.value}))},
+          h("option",{value:""},"Selecione…"),
+          [...grade.linhas].sort((a,b)=>a.colaborador.nome.localeCompare(b.colaborador.nome)).map(l=>h("option",{key:l.alocacaoId,value:l.alocacaoId},`${l.colaborador.nome} — ${l.colaborador.cargo}`))
+        )
+      ),
+      h(Field,{label:"Início"}, h(Input,{type:"date",value:ferias.inicio,min:grade.escala.inicio,max:grade.escala.fim,onChange:e=>setFerias(f=>({...f,inicio:e.target.value}))})),
+      h(Field,{label:"Fim"}, h(Input,{type:"date",value:ferias.fim,min:grade.escala.inicio,max:grade.escala.fim,onChange:e=>setFerias(f=>({...f,fim:e.target.value}))}))
+    ),
+    msgFerias && h("p",{style:{fontSize:12,margin:"10px 0 0",color:msgFerias.erro?danger:verde}},msgFerias.t),
+    h("div",{style:{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}},
+      h(Button,{onClick:()=>setPainelFerias(false),style:{fontSize:13,padding:"6px 12px"}},"Fechar"),
+      h(Button,{onClick:()=>aplicarFerias(true),disabled:salvandoFerias,style:{fontSize:13,padding:"6px 12px",color:danger}},"Remover férias do período"),
+      h(Button,{primary:true,onClick:()=>aplicarFerias(false),disabled:salvandoFerias,style:{fontSize:13,padding:"6px 12px",background:"#8B5CF6"}}, salvandoFerias?h(Spinner):null," Lançar férias")
+    )
+  );
+
+  return h("div",null, header, seletorPeriodos, linhaResponsavel, painel, modo==="grade"?tabela:porDia, h(Legenda));
 }
 
 function Legenda(){

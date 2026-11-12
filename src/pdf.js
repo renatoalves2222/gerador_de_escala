@@ -63,7 +63,7 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   const alturaCabecalhoDias = 26;
   const alturaLinha = 14;
   const alturaCorpo = totalLinhasComGrupo * alturaLinha;
-  const alturaLegendaAssinaturas = 120;
+  const alturaLegendaAssinaturas = 190; // legenda + espaço livre para carimbo/assinatura + rodapé
   const pageHeight = margin * 2 + alturaTopo + alturaFaixa + alturaSetorMes + alturaCabecalhoDias + alturaCorpo + alturaLegendaAssinaturas;
 
   const doc = new PDFDocument({ size: [pageWidth, pageHeight], margin: 0 });
@@ -204,7 +204,9 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   doc.fillColor("black");
 
   // ---------- assinaturas ----------
-  const yAss = y + 26;
+  // espaço livre acima da linha para caber carimbo + assinatura sem sobrepor a legenda
+  const ESPACO_CARIMBO = 85;
+  const yAss = y + 8 + ESPACO_CARIMBO;
   const rotulos = ["RESPONSÁVEL PELO SETOR", "COORDENAÇÃO GERAL DE ENFERMAGEM", "COORD. ADM. DE PESSOAL", "DIRETOR IMEDIATO/GERAL"];
   const larguraAss = larguraTabela / rotulos.length;
   rotulos.forEach((rotulo, i) => {

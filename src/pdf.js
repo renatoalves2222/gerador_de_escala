@@ -34,9 +34,14 @@ function fmtBR(iso) { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
 function gerarPdfEscala({ escala, dias, linhas }, res) {
   const colNome = 140, colCargo = 100, colHorario = 62, colDia = 20, colAssinatura = 190;
+  // COREN: coluna extra só quando algum colaborador da escala tem COREN
+  // (escalas assistenciais). Escalas de apoio continuam com o layout original.
+  const temCoren = linhas.some((l) => l.colaborador.coren);
+  const colCoren = temCoren ? 70 : 0;
+  const colIdent = colNome + colCargo + colCoren; // tudo antes de HORÁRIO
   const nDias = dias.length;
   const larguraGrade = nDias * colDia;
-  const larguraTabela = colNome + colCargo + colHorario + larguraGrade + colAssinatura;
+  const larguraTabela = colIdent + colHorario + larguraGrade + colAssinatura;
   const margin = 24;
   const pageWidth = larguraTabela + margin * 2;
 
@@ -111,11 +116,11 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   y += alturaFaixa;
 
   // ---------- SETOR / MÊS ----------
-  const largSetor = colNome + colCargo;
+  const largSetor = colIdent;
   doc.rect(x0, y, larguraTabela, alturaSetorMes).stroke(COR_BORDA);
   doc.moveTo(x0 + largSetor, y).lineTo(x0 + largSetor, y + alturaSetorMes).stroke(COR_BORDA);
   doc.moveTo(x0 + largSetor + colHorario, y).lineTo(x0 + largSetor + colHorario, y + alturaSetorMes).stroke(COR_BORDA);
-  doc.moveTo(x0 + colNome + colCargo + colHorario + larguraGrade, y).lineTo(x0 + colNome + colCargo + colHorario + larguraGrade, y + alturaSetorMes + alturaCabecalhoDias).stroke(COR_BORDA);
+  doc.moveTo(x0 + colIdent + colHorario + larguraGrade, y).lineTo(x0 + colIdent + colHorario + larguraGrade, y + alturaSetorMes + alturaCabecalhoDias).stroke(COR_BORDA);
   doc.font("Helvetica-Bold").fontSize(8).text(`SETOR: ${escala.setor}`, x0 + 4, y + 5, { width: largSetor - 8 });
   const periodoTexto = `${fmtBR(dias[0])} A ${fmtBR(dias[dias.length - 1])} - ${MESES[new Date(dias[dias.length - 1] + "T00:00:00").getMonth()]}`;
   doc.font("Helvetica-Bold").fontSize(7).text("MÊS", x0 + largSetor + colHorario, y + 2, { width: larguraGrade, align: "center" });
@@ -124,16 +129,20 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
 
   // ---------- cabeçalho dos dias (dia da semana + número) ----------
   const yCabDias = y;
-  doc.rect(x0, yCabDias, colNome + colCargo + colHorario, alturaCabecalhoDias).stroke(COR_BORDA);
+  doc.rect(x0, yCabDias, colIdent + colHorario, alturaCabecalhoDias).stroke(COR_BORDA);
   doc.font("Helvetica-Bold").fontSize(7);
   doc.text("NOME DO FUNCIONÁRIO", x0 + 2, yCabDias + 4, { width: colNome - 4 });
-  doc.text("HORÁRIO", x0 + colNome + colCargo, yCabDias + 9, { width: colHorario, align: "center" });
+  doc.text("HORÁRIO", x0 + colIdent, yCabDias + 9, { width: colHorario, align: "center" });
   doc.moveTo(x0 + colNome, yCabDias).lineTo(x0 + colNome, yCabDias + alturaCabecalhoDias).stroke(COR_BORDA);
-  doc.moveTo(x0 + colNome + colCargo, yCabDias).lineTo(x0 + colNome + colCargo, yCabDias + alturaCabecalhoDias).stroke(COR_BORDA);
+  if (temCoren) {
+    doc.text("COREN", x0 + colNome + colCargo, yCabDias + 9, { width: colCoren, align: "center" });
+    doc.moveTo(x0 + colNome + colCargo, yCabDias).lineTo(x0 + colNome + colCargo, yCabDias + alturaCabecalhoDias).stroke(COR_BORDA);
+  }
+  doc.moveTo(x0 + colIdent, yCabDias).lineTo(x0 + colIdent, yCabDias + alturaCabecalhoDias).stroke(COR_BORDA);
 
   dias.forEach((dia, i) => {
     const wd = new Date(dia + "T00:00:00").getDay();
-    const xd = x0 + colNome + colCargo + colHorario + i * colDia;
+    const xd = x0 + colIdent + colHorario + i * colDia;
     const bg = wd === 0 ? COR_DOMINGO : wd === 6 ? COR_SABADO : "#FFFFFF";
     const fg = wd === 0 || wd === 6 ? "#FFFFFF" : "#000000";
     doc.rect(xd, yCabDias, colDia, alturaCabecalhoDias / 2).fillAndStroke(bg, COR_BORDA);
@@ -143,7 +152,7 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   });
   doc.fillColor("black");
 
-  const xAssinatura = x0 + colNome + colCargo + colHorario + larguraGrade;
+  const xAssinatura = x0 + colIdent + colHorario + larguraGrade;
   doc.rect(xAssinatura, yCabDias, colAssinatura, alturaCabecalhoDias).stroke(COR_BORDA);
   doc.font("Helvetica-Bold").fontSize(7).text("ASSINATURA", xAssinatura, yCabDias + 9, { width: colAssinatura, align: "center" });
   y += alturaCabecalhoDias;
@@ -159,15 +168,17 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
       const r = REGIMES[linha.colaborador.regime];
       doc.rect(x0, y, colNome, alturaLinha).stroke(COR_BORDA);
       doc.rect(x0 + colNome, y, colCargo, alturaLinha).stroke(COR_BORDA);
-      doc.rect(x0 + colNome + colCargo, y, colHorario, alturaLinha).stroke(COR_BORDA);
+      if (temCoren) doc.rect(x0 + colNome + colCargo, y, colCoren, alturaLinha).stroke(COR_BORDA);
+      doc.rect(x0 + colIdent, y, colHorario, alturaLinha).stroke(COR_BORDA);
       doc.font("Helvetica").fontSize(6.5);
       doc.text(linha.colaborador.nome, x0 + 3, y + 3.5, { width: colNome - 6, ellipsis: true });
       doc.text(linha.colaborador.cargo, x0 + colNome + 2, y + 3.5, { width: colCargo - 4, ellipsis: true });
-      doc.text(r.horario || "", x0 + colNome + colCargo + 2, y + 3.5, { width: colHorario - 4, align: "center" });
+      if (temCoren) doc.text(linha.colaborador.coren || "", x0 + colNome + colCargo + 2, y + 3.5, { width: colCoren - 4, align: "center", ellipsis: true });
+      doc.text(r.horario || "", x0 + colIdent + 2, y + 3.5, { width: colHorario - 4, align: "center" });
 
       dias.forEach((dia, i) => {
         const wd = new Date(dia + "T00:00:00").getDay();
-        const xd = x0 + colNome + colCargo + colHorario + i * colDia;
+        const xd = x0 + colIdent + colHorario + i * colDia;
         const codigo = linha.dias[i];
         const weekend = wd === 0 || wd === 6;
         const bg = weekend ? (wd === 0 ? COR_DOMINGO : COR_SABADO) : "#FFFFFF";

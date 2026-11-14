@@ -67,6 +67,8 @@ async function initSchema() {
   await pool.query(SCHEMA);
   // 12x36: grupo_ref = dia 21 da escala em que o "par/ímpar" foi definido.
   await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS grupo_ref date");
+  // COREN dos colaboradores assistenciais (enfermeiros/técnicos) — aparece no PDF da escala.
+  await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS coren text");
   // Migração única: quem já tinha grupo sem referência passa a usar a escala
   // mais recente em que foi alocado (a que o gestor conferiu); sem escala,
   // usa o ciclo vigente. Assim a última escala gerada continua igual.

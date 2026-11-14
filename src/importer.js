@@ -15,6 +15,8 @@ function parsePlanilha(buffer) {
   const wb = XLSX.read(buffer, { type: "buffer" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  // COREN é opcional no export do RH: usa qualquer coluna cujo nome contenha "COREN".
+  const colCoren = rows[0] ? Object.keys(rows[0]).find((k) => /coren/i.test(k)) : null;
 
   const registros = [];
   const problemas = [];
@@ -26,6 +28,7 @@ function parsePlanilha(buffer) {
     const setor = String(row[COL.setor] || "").trim();
     const situacao = String(row[COL.situacao] || "").trim().toUpperCase();
     const horarioTexto = String(row[COL.horario] || "").trim();
+    const coren = colCoren ? String(row[colCoren] || "").trim().toUpperCase() : "";
 
     if (!nome || !setor) {
       problemas.push({ linha: i + 2, motivo: "sem nome ou setor" });
@@ -39,6 +42,7 @@ function parsePlanilha(buffer) {
       situacao, // 'A' = ativo; qualquer outra coisa entra como inativo/afastado
       regime: mapRegime(horarioTexto),
       horarioTexto,
+      coren: coren || null,
     });
   });
 

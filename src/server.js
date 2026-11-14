@@ -136,15 +136,16 @@ app.get("/api/colaboradores", autenticar, ah(async (req, res) => {
 }));
 
 app.post("/api/colaboradores", autenticar, ah(async (req, res) => {
-  const { nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio } = req.body || {};
+  const { nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio, coren } = req.body || {};
   if (!nome || !setor || !cargo || !regime) return res.status(400).json({ erro: "Nome, setor, cargo e regime são obrigatórios." });
   const setorU = setor.toUpperCase();
   if (!podeEditarSetor(req.gestor, setorU)) return res.status(403).json({ erro: `Você não é responsável por ${setorU}.` });
   if (!REGIMES[regime]) return res.status(400).json({ erro: "Regime inválido." });
   const { rows } = await pool.query(
-    `INSERT INTO colaboradores (nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio, situacao)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'A') RETURNING *`,
-    [nome.toUpperCase(), setorU, cargo.toUpperCase(), regime, grupo || null, grupo ? (grupo_ref || null) : null, ciclo_inicio || null]
+    `INSERT INTO colaboradores (nome, setor, cargo, regime, grupo, grupo_ref, ciclo_inicio, coren, situacao)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'A') RETURNING *`,
+    [nome.toUpperCase(), setorU, cargo.toUpperCase(), regime, grupo || null, grupo ? (grupo_ref || null) : null, ciclo_inicio || null,
+     coren && String(coren).trim() ? String(coren).trim().toUpperCase() : null]
   );
   res.status(201).json(rows[0]);
 }));
@@ -156,12 +157,14 @@ app.patch("/api/colaboradores/:id", autenticar, ah(async (req, res) => {
   if (!atual) return res.status(404).json({ erro: "Colaborador não encontrado." });
   if (!podeEditarSetor(req.gestor, atual.setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
-  const campos = ["nome", "cargo", "grupo", "grupo_ref", "ciclo_inicio", "situacao"];
+  const campos = ["nome", "cargo", "grupo", "grupo_ref", "ciclo_inicio", "situacao", "coren"];
   const sets = [];
   const valores = [];
   campos.forEach((campo) => {
     if (req.body[campo] !== undefined) {
-      valores.push(req.body[campo]);
+      let v = req.body[campo];
+      if (campo === "coren") v = v && String(v).trim() ? String(v).trim().toUpperCase() : null;
+      valores.push(v);
       sets.push(`${campo} = $${valores.length}`);
     }
   });
@@ -207,9 +210,10 @@ app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("
         const { rows: existentes } = await client.query("SELECT id, situacao FROM colaboradores WHERE chapa = $1", [r.chapa]);
         if (existentes[0]) {
           await client.query(
-            `UPDATE colaboradores SET nome=$1, setor=$2, cargo=$3, regime=$4, horario_texto=$5, situacao=$6, atualizado_em=now()
+            `UPDATE colaboradores SET nome=$1, setor=$2, cargo=$3, regime=$4, horario_texto=$5, situacao=$6,
+               coren=COALESCE($8, coren), atualizado_em=now()
              WHERE id = $7`,
-            [r.nome, r.setor, r.cargo, r.regime, r.horarioTexto, situacaoNormalizada, existentes[0].id]
+            [r.nome, r.setor, r.cargo, r.regime, r.horarioTexto, situacaoNormalizada, existentes[0].id, r.coren]
           );
           if (situacaoNormalizada !== "A" && existentes[0].situacao === "A") inativados++;
           else atualizados++;
@@ -218,9 +222,9 @@ app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("
       }
       if (situacaoNormalizada !== "A") continue; // não cria registro novo já inativo
       await client.query(
-        `INSERT INTO colaboradores (chapa, nome, setor, cargo, regime, horario_texto, situacao)
-         VALUES ($1,$2,$3,$4,$5,$6,'A')`,
-        [r.chapa, r.nome, r.setor, r.cargo, r.regime, r.horarioTexto]
+        `INSERT INTO colaboradores (chapa, nome, setor, cargo, regime, horario_texto, coren, situacao)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'A')`,
+        [r.chapa, r.nome, r.setor, r.cargo, r.regime, r.horarioTexto, r.coren]
       );
       novos++;
     }
@@ -344,7 +348,7 @@ async function montarGrade(escalaId) {
   const linhas = alocacoes.map((a) => ({
     alocacaoId: a.alocacao_id,
     colaborador: {
-      id: a.id, nome: a.nome, cargo: a.cargo, regime: a.regime,
+      id: a.id, nome: a.nome, cargo: a.cargo, regime: a.regime, coren: a.coren || null,
       // par/ímpar relativo ao mês de início DESTA escala (inverte após mês de 31 dias)
       grupo: REGIMES[a.regime] && REGIMES[a.regime].tipo === "paridade" ? grupoNaEscala(a, escala.inicio) : a.grupo,
     },

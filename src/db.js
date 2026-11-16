@@ -69,6 +69,11 @@ async function initSchema() {
   await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS grupo_ref date");
   // COREN dos colaboradores assistenciais (enfermeiros/técnicos) — aparece no PDF da escala.
   await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS coren text");
+  // setor_rh = último setor informado pela planilha do RH. Permite que o gestor
+  // troque o setor no sistema sem que a próxima importação desfaça a troca:
+  // a importação só muda o setor quando o próprio RH mudar o setor da pessoa.
+  await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS setor_rh text");
+  await pool.query("UPDATE colaboradores SET setor_rh = setor WHERE chapa IS NOT NULL AND setor_rh IS NULL");
   // Migração única: quem já tinha grupo sem referência passa a usar a escala
   // mais recente em que foi alocado (a que o gestor conferiu); sem escala,
   // usa o ciclo vigente. Assim a última escala gerada continua igual.

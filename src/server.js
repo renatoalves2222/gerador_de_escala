@@ -157,7 +157,13 @@ app.patch("/api/colaboradores/:id", autenticar, ah(async (req, res) => {
   if (!atual) return res.status(404).json({ erro: "Colaborador não encontrado." });
   if (!podeEditarSetor(req.gestor, atual.setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
-  const campos = ["nome", "cargo", "grupo", "grupo_ref", "ciclo_inicio", "situacao", "coren"];
+  // troca de setor: quem pode editar o setor ATUAL pode transferir para qualquer setor
+  if (req.body.setor !== undefined) {
+    const novo = String(req.body.setor || "").trim().toUpperCase();
+    if (!novo) return res.status(400).json({ erro: "Informe o novo setor." });
+    req.body.setor = novo;
+  }
+  const campos = ["nome", "setor", "cargo", "grupo", "grupo_ref", "ciclo_inicio", "situacao", "coren"];
   const sets = [];
   const valores = [];
   campos.forEach((campo) => {
@@ -210,7 +216,9 @@ app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("
         const { rows: existentes } = await client.query("SELECT id, situacao FROM colaboradores WHERE chapa = $1", [r.chapa]);
         if (existentes[0]) {
           await client.query(
-            `UPDATE colaboradores SET nome=$1, setor=$2, cargo=$3, regime=$4, horario_texto=$5, situacao=$6,
+            `UPDATE colaboradores SET nome=$1,
+               setor = CASE WHEN setor_rh IS DISTINCT FROM $2 THEN $2 ELSE setor END, setor_rh=$2,
+               cargo=$3, regime=$4, horario_texto=$5, situacao=$6,
                coren=COALESCE($8, coren), atualizado_em=now()
              WHERE id = $7`,
             [r.nome, r.setor, r.cargo, r.regime, r.horarioTexto, situacaoNormalizada, existentes[0].id, r.coren]
@@ -222,8 +230,8 @@ app.post("/api/colaboradores/importar", autenticar, exigirAdmin, upload.single("
       }
       if (situacaoNormalizada !== "A") continue; // não cria registro novo já inativo
       await client.query(
-        `INSERT INTO colaboradores (chapa, nome, setor, cargo, regime, horario_texto, coren, situacao)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'A')`,
+        `INSERT INTO colaboradores (chapa, nome, setor, setor_rh, cargo, regime, horario_texto, coren, situacao)
+         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,'A')`,
         [r.chapa, r.nome, r.setor, r.cargo, r.regime, r.horarioTexto, r.coren]
       );
       novos++;

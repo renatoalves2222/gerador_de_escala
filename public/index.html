@@ -197,6 +197,13 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
     return true;
   });
   const filtrosAtivos=JSON.stringify(filtros)!==JSON.stringify(FILTROS_VAZIOS);
+  async function trocarSetor(c,novo){
+    if(novo==="__outro__"){ novo=window.prompt(`Novo setor de ${c.nome}:`,""); if(!novo) return; }
+    novo=novo.trim().toUpperCase();
+    if(!novo||novo===c.setor) return;
+    if(!window.confirm(`Mover ${c.nome}\nde ${c.setor}\npara ${novo}?\n\nEscalas já geradas não mudam; a troca vale para as próximas escalas.`)) return;
+    try{ await api(`/api/colaboradores/${c.id}`,token,{method:"PATCH",body:JSON.stringify({setor:novo})}); recarregar(); }catch(e){ setErro(e.message); }
+  }
   async function editarCoren(c){
     const v=window.prompt(`COREN de ${c.nome} (deixe vazio para remover):`, c.coren||"");
     if(v===null) return;
@@ -303,7 +310,12 @@ function Colaboradores({token,gestor,colaboradores,recarregar,podeEditar}){
                   editavel && h("button",{className:"btn",onClick:()=>editarCoren(c),title:"Editar COREN",style:{fontSize:11,color:teal,marginLeft:c.coren?6:0}}, c.coren?"✎":"+ COREN")
                 )
               ),
-              h("td",{style:{padding:"10px 16px",color:muted,...truncar},title:c.setor},c.setor),
+              h("td",{style:{padding:"10px 16px",color:muted,...truncar},title:c.setor},
+                editavel
+                  ? h("select",{value:c.setor,onChange:e=>trocarSetor(c,e.target.value),title:"Trocar setor",style:{width:"100%",fontSize:12,border:`1px solid ${line}`,borderRadius:4,padding:"4px 6px",color:ink,background:panel}},
+                      setoresLista.map(s2=>h("option",{key:s2,value:s2},s2)),
+                      h("option",{value:"__outro__"},"+ Outro setor…"))
+                  : c.setor),
               h("td",{style:{padding:"10px 16px",color:muted,...truncar},title:c.cargo},c.cargo),
               h("td",{style:{padding:"10px 16px"}}, h("span",{style:{fontSize:12,padding:"2px 8px",borderRadius:10,background:r.cor+"1A",color:r.cor,display:"inline-block",maxWidth:"100%",...truncar},title:r.label},r.label)),
               h("td",{style:{padding:"10px 16px"}},

@@ -74,6 +74,10 @@ async function initSchema() {
   // a importação só muda o setor quando o próprio RH mudar o setor da pessoa.
   await pool.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS setor_rh text");
   await pool.query("UPDATE colaboradores SET setor_rh = setor WHERE chapa IS NOT NULL AND setor_rh IS NULL");
+  // Escala pode juntar vários setores. escalas.setor vira o rótulo ("A / B") e
+  // escalas.setores guarda a lista. Escalas antigas = lista com um setor só.
+  await pool.query("ALTER TABLE escalas ADD COLUMN IF NOT EXISTS setores text[]");
+  await pool.query("UPDATE escalas SET setores = ARRAY[setor] WHERE setores IS NULL");
   // Migração única: quem já tinha grupo sem referência passa a usar a escala
   // mais recente em que foi alocado (a que o gestor conferiu); sem escala,
   // usa o ciclo vigente. Assim a última escala gerada continua igual.

@@ -45,21 +45,27 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   const margin = 24;
   const pageWidth = larguraTabela + margin * 2;
 
-  // agrupa por cargo, depois por regime+grupo (par/ímpar), mesma lógica da tela
-  const cargos = [...new Set(linhas.map((l) => l.colaborador.cargo))];
+  // agrupa por setor (quando a escala junta vários), cargo, depois regime+grupo (par/ímpar)
+  const setoresLinhas = [...new Set(linhas.map((l) => l.colaborador.setor || ""))];
+  const multiSetor = setoresLinhas.length > 1;
   let totalLinhasComGrupo = 0;
   const grupos = [];
+  setoresLinhas.forEach((setorL) => {
+  const linhasSetor = linhas.filter((l) => (l.colaborador.setor || "") === setorL);
+  const cargos = [...new Set(linhasSetor.map((l) => l.colaborador.cargo))];
   cargos.forEach((cargo) => {
     REGIME_ORDEM.forEach((regime) => {
       const precisaSplitParImpar = regime === "doze36Diurno" || regime === "doze36Noturno";
       const subgrupos = precisaSplitParImpar ? GRUPO_ORDEM : [null];
       subgrupos.forEach((grupo) => {
-        const doGrupo = linhas.filter((l) => l.colaborador.cargo === cargo && l.colaborador.regime === regime && (grupo === null || l.colaborador.grupo === grupo));
+        const doGrupo = linhasSetor.filter((l) => l.colaborador.cargo === cargo && l.colaborador.regime === regime && (grupo === null || l.colaborador.grupo === grupo));
         if (doGrupo.length === 0) return;
-        grupos.push({ cargo, regime, grupo, titulo: tituloGrupo(regime, grupo), linhas: doGrupo });
+        const titulo = (multiSetor ? `${setorL} — ` : "") + tituloGrupo(regime, grupo);
+        grupos.push({ cargo, regime, grupo, titulo, linhas: doGrupo });
         totalLinhasComGrupo += 1 + doGrupo.length; // 1 = linha do cabeçalho do grupo
       });
     });
+  });
   });
 
   const alturaTopo = 96;
@@ -121,7 +127,8 @@ function gerarPdfEscala({ escala, dias, linhas }, res) {
   doc.moveTo(x0 + largSetor, y).lineTo(x0 + largSetor, y + alturaSetorMes).stroke(COR_BORDA);
   doc.moveTo(x0 + largSetor + colHorario, y).lineTo(x0 + largSetor + colHorario, y + alturaSetorMes).stroke(COR_BORDA);
   doc.moveTo(x0 + colIdent + colHorario + larguraGrade, y).lineTo(x0 + colIdent + colHorario + larguraGrade, y + alturaSetorMes + alturaCabecalhoDias).stroke(COR_BORDA);
-  doc.font("Helvetica-Bold").fontSize(8).text(`SETOR: ${escala.setor}`, x0 + 4, y + 5, { width: largSetor - 8 });
+  const textoSetor = `${multiSetor || (escala.setores && escala.setores.length > 1) ? "SETORES" : "SETOR"}: ${escala.setor}`;
+  doc.font("Helvetica-Bold").fontSize(textoSetor.length > 45 ? 6.5 : 8).text(textoSetor, x0 + 4, y + (textoSetor.length > 45 ? 3 : 5), { width: largSetor - 8, height: alturaSetorMes - 4, ellipsis: true });
   const periodoTexto = `${fmtBR(dias[0])} A ${fmtBR(dias[dias.length - 1])} - ${MESES[new Date(dias[dias.length - 1] + "T00:00:00").getMonth()]}`;
   doc.font("Helvetica-Bold").fontSize(7).text("MÊS", x0 + largSetor + colHorario, y + 2, { width: larguraGrade, align: "center" });
   doc.font("Helvetica").fontSize(7).text(periodoTexto, x0 + largSetor + colHorario, y + 10, { width: larguraGrade, align: "center" });

@@ -363,7 +363,7 @@ function proximoDia21(){
 
 function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
   const [inicio,setInicio]=useState(proximoDia21());
-  const [setor,setSetor]=useState("");
+  const [setoresSel,setSetoresSel]=useState([]);
   const [responsavel,setResponsavel]=useState("");
   const [excluidos,setExcluidos]=useState({});
   const [erro,setErro]=useState(null);
@@ -371,15 +371,23 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
   const [enviando,setEnviando]=useState(false);
 
   const setoresProprios = [...new Set(colaboradores.map(c=>c.setor))].filter(podeEditar);
-  const doSetor = colaboradores.filter(c=>c.setor===setor && c.situacao==="A");
-  const cargos = [...new Set(doSetor.map(c=>c.cargo))];
+  const doSetor = colaboradores.filter(c=>setoresSel.includes(c.setor) && c.situacao==="A");
+  // blocos de seleção: um por setor+cargo (o setor só aparece no título quando há mais de um)
+  const blocos = [];
+  setoresSel.forEach(st=>{
+    [...new Set(doSetor.filter(c=>c.setor===st).map(c=>c.cargo))].forEach(cg=>blocos.push({setor:st,cargo:cg}));
+  });
+  function toggleSetor(st){
+    setSetoresSel(sel=>sel.includes(st)?sel.filter(x=>x!==st):[...sel,st]);
+    setResultado(null);
+  }
 
   async function gerar(){
     setErro(null); setResultado(null);
-    if(!setor||!responsavel.trim()) return;
+    if(setoresSel.length===0||!responsavel.trim()) return;
     setEnviando(true);
     try{
-      const data = await api("/api/escalas",token,{method:"POST",body:JSON.stringify({setor,inicio,responsavel,excluidos:Object.keys(excluidos).filter(id=>excluidos[id])})});
+      const data = await api("/api/escalas",token,{method:"POST",body:JSON.stringify({setores:setoresSel,inicio,responsavel,excluidos:Object.keys(excluidos).filter(id=>excluidos[id])})});
       setResultado(data); setExcluidos({}); setResponsavel("");
       setTimeout(onGerada,900);
     }catch(e){ setErro(e.message); }
@@ -391,21 +399,28 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
       h(Field,{label:"Início do ciclo"}, h(Input,{type:"date",value:inicio,onChange:e=>setInicio(e.target.value)})),
       h("p",{style:{fontSize:12,color:muted}},"Fim do ciclo: ",h("strong",null,fmtBR(fimDoCiclo(inicio)))),
       Number(inicio.slice(-2))!==21 && h("p",{style:{fontSize:11,color:"#D98B2B"}},"⚠ O ciclo da unidade sempre começa no dia 21. Confira a data."),
-      h(Field,{label:"Setor"}, h(Select,{value:setor,onChange:e=>{setSetor(e.target.value);setExcluidos({});setResultado(null);}},
-        h("option",{value:""},"Selecione…"), setoresProprios.map(s=>h("option",{key:s,value:s},s)))),
+      h(Field,{label:setoresSel.length>1?`Setores (${setoresSel.length} — escala única)`:"Setor(es)"},
+        h("div",{style:{display:"flex",flexDirection:"column",gap:6,maxHeight:260,overflowY:"auto"}},
+          setoresProprios.map(st=>{
+            const marcado=setoresSel.includes(st);
+            return h("label",{key:st,style:{display:"flex",alignItems:"center",gap:8,fontSize:13,padding:"6px 10px",borderRadius:6,cursor:"pointer",border:`1px solid ${marcado?teal:line}`,background:marcado?teal+"12":"transparent"}},
+              h("input",{type:"checkbox",checked:marcado,onChange:()=>toggleSetor(st)}), st);
+          })
+        )),
+      setoresSel.length>1 && h("p",{style:{fontSize:11,color:muted,margin:0}},"Os setores marcados vão sair juntos em uma única escala e um único PDF."),
       setoresProprios.length===0 && h("p",{style:{fontSize:12,color:danger}},"Você não é responsável por nenhum setor com colaboradores."),
       h(Field,{label:"Responsável pelo setor"}, h(Input,{value:responsavel,placeholder:"Nome de quem assina",onChange:e=>setResponsavel(e.target.value)})),
       erro && h("p",{style:{fontSize:12,color:danger}},erro),
       resultado && h("p",{style:{fontSize:12,color:teal}},`Escala gerada — ${resultado.incluidos} colaborador(es) incluído(s).`)
     ),
     h("div",null,
-      !setor ? h(EmptyHint,{text:"Escolha o setor — a lista de colaboradores vem do cadastro."}) :
-      cargos.length===0 ? h(EmptyHint,{text:"Nenhum colaborador ativo neste setor."}) :
+      setoresSel.length===0 ? h(EmptyHint,{text:"Marque um ou mais setores — a lista de colaboradores vem do cadastro."}) :
+      blocos.length===0 ? h(EmptyHint,{text:"Nenhum colaborador ativo nos setores marcados."}) :
       h("div",{style:{display:"flex",flexDirection:"column",gap:16}},
-        cargos.map(cg => h("div",{key:cg,style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:16}},
-          h("div",{style:{fontSize:14,fontWeight:600,marginBottom:12}},cg),
+        blocos.map(({setor:st,cargo:cg}) => h("div",{key:st+"|"+cg,style:{background:panel,border:`1px solid ${line}`,borderRadius:8,padding:16}},
+          h("div",{style:{fontSize:14,fontWeight:600,marginBottom:12}}, setoresSel.length>1 && h("span",{style:{color:teal}},st+" · "), cg),
           h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
-            doSetor.filter(c=>c.cargo===cg).map(c=>{
+            doSetor.filter(c=>c.setor===st&&c.cargo===cg).map(c=>{
               const r = REGIMES[c.regime]; const bloqueado = c.precisaConfiguracao; const incluido = !excluidos[c.id] && !bloqueado;
               return h("button",{key:c.id,className:"btn",disabled:bloqueado,onClick:()=>setExcluidos(e=>({...e,[c.id]:!e[c.id]})),
                 style:{display:"flex",alignItems:"center",gap:8,textAlign:"left",fontSize:14,padding:"8px 12px",borderRadius:6,border:`1px solid ${incluido?r.cor:line}`,background:incluido?r.cor+"12":"transparent"}},
@@ -418,7 +433,7 @@ function NovaEscala({token,gestor,colaboradores,podeEditar,onGerada}){
           )
         )),
         h("div",{style:{display:"flex",justifyContent:"flex-end",paddingTop:8}},
-          h(Button,{primary:true,disabled:!responsavel.trim()||enviando,onClick:gerar}, enviando?h(Spinner):null," Gerar escala →")
+          h(Button,{primary:true,disabled:!responsavel.trim()||enviando,onClick:gerar}, enviando?h(Spinner):null,setoresSel.length>1?" Gerar escala única →":" Gerar escala →")
         )
       )
     )
@@ -456,8 +471,13 @@ function VisaoEscala({token,gestor,podeEditar}){
     api(`/api/escalas/${id}/grade`,token).then(setGrade);
   }
 
+  // escala com vários setores: editável só por quem responde por todos eles
+  function podeEditarEsc(){
+    const sts = grade && grade.escala ? (grade.escala.setores&&grade.escala.setores.length?grade.escala.setores:[grade.escala.setor]) : [setorAtivo];
+    return sts.every(st=>podeEditar(st));
+  }
   async function marcarOverride(alocacaoId,dia,atual){
-    if(!podeEditar(setorAtivo)) return;
+    if(!podeEditarEsc()) return;
     const seq=[null,"FE","FF"]; const proximo=seq[(seq.indexOf(atual)+1)%seq.length];
     await api(`/api/alocacoes/${alocacaoId}/override`,token,{method:"PUT",body:JSON.stringify({dia,codigo:proximo})});
     setGrade(await api(`/api/escalas/${escalaId}/grade`,token));
@@ -504,7 +524,7 @@ function VisaoEscala({token,gestor,podeEditar}){
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `escala-${setorAtivo}-${grade.escala.inicio}.pdf`;
+      a.href = url; a.download = `escala-${grade.escala.setor.replace(/[^A-Za-z0-9]+/g,"-")}-${grade.escala.inicio}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch(e){ window.alert(e.message || "Não foi possível exportar."); }
@@ -526,7 +546,8 @@ function VisaoEscala({token,gestor,podeEditar}){
   const seletorPeriodos = h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}},
     escalas.map(e=>h("button",{key:e.id,className:"btn",onClick:()=>abrirEscala(e.id),
       style:{fontSize:13,padding:"6px 12px",borderRadius:6,border:`1px solid ${e.id===escalaId?teal:line}`,background:e.id===escalaId?teal+"12":panel,color:e.id===escalaId?teal:muted,fontWeight:e.id===escalaId?600:400}},
-      `${fmtBR(e.inicio)} a ${fmtBR(e.fim)}`
+      `${fmtBR(e.inicio)} a ${fmtBR(e.fim)}`,
+      e.setores&&e.setores.length>1 && h("span",{style:{fontSize:11,marginLeft:6,opacity:.8}},`· ${e.setores.join(" + ")}`)
     ))
   );
 
@@ -535,7 +556,7 @@ function VisaoEscala({token,gestor,podeEditar}){
   const linhaResponsavel = h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}},
     h("p",{style:{fontSize:12,color:muted,display:"flex",gap:6,alignItems:"center",margin:0}},
       "Responsável: ", h("strong",null,grade.escala.responsavel),
-      !podeEditar(setorAtivo) && h("span",{style:{color:faint}}," 🔒 somente leitura")
+      !podeEditarEsc() && h("span",{style:{color:faint}}," 🔒 somente leitura")
     ),
     h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
       h("div",{style:{display:"flex",borderRadius:6,overflow:"hidden",border:`1px solid ${line}`}},
@@ -543,8 +564,8 @@ function VisaoEscala({token,gestor,podeEditar}){
         h("button",{className:"btn",onClick:()=>setModo("dia"),style:{fontSize:12,padding:"6px 10px",background:modo==="dia"?teal:panel,color:modo==="dia"?"#fff":muted}},"Por dia")
       ),
       h(Button,{onClick:exportarPdf,disabled:exportando,style:{padding:"4px 10px",fontSize:12}}, exportando?h(Spinner):null," Exportar PDF"),
-            podeEditar(setorAtivo) && h(Button,{onClick:abrirPainelFerias,style:{padding:"4px 10px",fontSize:12,color:"#8B5CF6",borderColor:painelFerias?"#8B5CF6":line}}, "🏖 Lançar férias"),
-      podeEditar(setorAtivo) && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
+            podeEditarEsc() && h(Button,{onClick:abrirPainelFerias,style:{padding:"4px 10px",fontSize:12,color:"#8B5CF6",borderColor:painelFerias?"#8B5CF6":line}}, "🏖 Lançar férias"),
+      podeEditarEsc() && h(Button,{onClick:excluirEscala,disabled:excluindo,style:{color:danger,borderColor:line,padding:"4px 10px",fontSize:12}}, excluindo?h(Spinner):null," Excluir esta escala")
     )
   );
 
@@ -566,7 +587,7 @@ function VisaoEscala({token,gestor,podeEditar}){
             return h("tr",{key:linha.alocacaoId,style:{borderTop:`1px solid ${line}`}},
               h("td",{style:{position:"sticky",left:0,padding:"6px 12px",background:panel,borderRight:`1px solid ${line}`}},
                 h("div",{style:{fontWeight:500}},linha.colaborador.nome),
-                h("div",{style:{fontSize:10,color:faint}},`${linha.colaborador.cargo}${linha.colaborador.coren?" · COREN "+linha.colaborador.coren:""} · ${r.label}${linha.colaborador.grupo&&precisaParidade(linha.colaborador.regime)?" "+rotuloGrupo(linha.colaborador.grupo):""}`)
+                h("div",{style:{fontSize:10,color:faint}},`${grade.escala.setores&&grade.escala.setores.length>1?linha.colaborador.setor+" · ":""}${linha.colaborador.cargo}${linha.colaborador.coren?" · COREN "+linha.colaborador.coren:""} · ${r.label}${linha.colaborador.grupo&&precisaParidade(linha.colaborador.regime)?" "+rotuloGrupo(linha.colaborador.grupo):""}`)
               ),
               grade.dias.map((dia,di)=>{
                 const code = linha.dias[di];
@@ -576,7 +597,7 @@ function VisaoEscala({token,gestor,podeEditar}){
                 if(code==="FE") color="#8B5CF6";
                 if(code==="FF") color="#B45309";
                 return h("td",{key:di,onClick:()=>marcarOverride(linha.alocacaoId,dia,(code==="FE"||code==="FF")?code:null),
-                  style:{textAlign:"center",fontFamily:"monospace",padding:"6px 0",color,fontWeight:code==="F"?400:600,cursor:podeEditar(setorAtivo)?"pointer":"default",background:weekend?(wd===0?sunday+"12":saturday+"12"):"transparent",userSelect:"none"}
+                  style:{textAlign:"center",fontFamily:"monospace",padding:"6px 0",color,fontWeight:code==="F"?400:600,cursor:podeEditarEsc()?"pointer":"default",background:weekend?(wd===0?sunday+"12":saturday+"12"):"transparent",userSelect:"none"}
                 },code);
               })
             );
@@ -615,7 +636,7 @@ function VisaoEscala({token,gestor,podeEditar}){
     })
   );
 
-  const painel = painelFerias && podeEditar(setorAtivo) && h("div",{style:{background:panel,border:"1px solid #8B5CF6",borderRadius:8,padding:16,marginBottom:12}},
+  const painel = painelFerias && podeEditarEsc() && h("div",{style:{background:panel,border:"1px solid #8B5CF6",borderRadius:8,padding:16,marginBottom:12}},
     h("div",{style:{fontSize:14,fontWeight:600,marginBottom:4,color:"#8B5CF6"}},"Lançar período de férias"),
     h("p",{style:{fontSize:12,color:muted,margin:"0 0 12px"}},`Marca FE em todos os dias do período, dentro desta escala (${fmtBR(grade.escala.inicio)} a ${fmtBR(grade.escala.fim)}). Dias isolados continuam podendo ser ajustados clicando na célula.`),
     h("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12,alignItems:"end"}},

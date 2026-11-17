@@ -44,6 +44,13 @@ function autenticar(req, res, next) {
     return res.status(401).json({ erro: "Sessão inválida ou expirada." });
   }
 }
+// escala com vários setores: só edita quem é responsável por TODOS eles (ou admin)
+function setoresDaEscala(escala) {
+  return escala.setores && escala.setores.length ? escala.setores : [escala.setor];
+}
+function podeEditarEscala(gestor, escala) {
+  return gestor.is_admin || setoresDaEscala(escala).every((s) => gestor.setores.includes(s));
+}
 function podeEditarSetor(gestor, setor) {
   return gestor.is_admin || gestor.setores.includes(setor);
 }
@@ -74,11 +81,11 @@ app.put("/api/alocacoes/:id/periodo", autenticar, ah(async (req, res) => {
   if (fim < inicio) return res.status(400).json({ erro: "A data final deve ser igual ou posterior à inicial." });
   if (codigo && !["FE", "FF"].includes(codigo)) return res.status(400).json({ erro: "Código inválido." });
   const { rows: aloc } = await pool.query(
-    `SELECT a.id, e.setor, e.inicio, e.fim FROM alocacoes a JOIN escalas e ON e.id = a.escala_id WHERE a.id = $1`,
+    `SELECT a.id, e.setor, e.setores, e.inicio, e.fim FROM alocacoes a JOIN escalas e ON e.id = a.escala_id WHERE a.id = $1`,
     [req.params.id]
   );
   if (!aloc[0]) return res.status(404).json({ erro: "Alocação não encontrada." });
-  if (!podeEditarSetor(req.gestor, aloc[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+  if (!podeEditarEscala(req.gestor, aloc[0])) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
   // limita o período às datas desta escala (21 a 20)
   const de = inicio < aloc[0].inicio ? aloc[0].inicio : inicio;
@@ -258,17 +265,21 @@ function periodosSobrepoem(aIni, aFim, bIni, bFim) {
 }
 
 app.post("/api/escalas", autenticar, ah(async (req, res) => {
-  const { setor, inicio, responsavel, excluidos } = req.body || {};
-  if (!setor || !inicio || !responsavel) return res.status(400).json({ erro: "Setor, início e responsável são obrigatórios." });
-  const setorU = setor.toUpperCase();
-  if (!podeEditarSetor(req.gestor, setorU)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+  const { setor, setores, inicio, responsavel, excluidos } = req.body || {};
+  // aceita vários setores (escala única juntando todos) ou o campo antigo "setor"
+  const listaSetores = [...new Set((Array.isArray(setores) && setores.length ? setores : setor ? [setor] : [])
+    .map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
+  if (listaSetores.length === 0 || !inicio || !responsavel) return res.status(400).json({ erro: "Setor(es), início e responsável são obrigatórios." });
+  const semPermissao = listaSetores.filter((s) => !podeEditarSetor(req.gestor, s));
+  if (semPermissao.length) return res.status(403).json({ erro: `Você não é responsável por: ${semPermissao.join(", ")}.` });
+  const setorU = listaSetores.join(" / "); // rótulo usado na tela e no PDF
 
   // ciclo padrão da unidade: sempre do dia 21 ao dia 20 do mês seguinte (varia 28-31 dias conforme o mês)
   const [anoIni, mesIni] = inicio.split("-").map(Number);
   const fim = new Date(anoIni, mesIni, 20); // mesIni já é o mês seguinte (0-indexed = mês atual)
   const fimISO = `${fim.getFullYear()}-${String(fim.getMonth() + 1).padStart(2, "0")}-${String(fim.getDate()).padStart(2, "0")}`;
 
-  const { rows: doSetor } = await pool.query("SELECT * FROM colaboradores WHERE setor = $1 AND situacao = 'A'", [setorU]);
+  const { rows: doSetor } = await pool.query("SELECT * FROM colaboradores WHERE setor = ANY($1) AND situacao = 'A'", [listaSetores]);
   const excluidosSet = new Set(excluidos || []);
 
   const { rows: alocadosAntes } = await pool.query(
@@ -291,8 +302,8 @@ app.post("/api/escalas", autenticar, ah(async (req, res) => {
   try {
     await client.query("BEGIN");
     const { rows: escRows } = await client.query(
-      `INSERT INTO escalas (setor, inicio, fim, responsavel, criado_por) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [setorU, inicio, fimISO, responsavel.toUpperCase(), req.gestor.id]
+      `INSERT INTO escalas (setor, setores, inicio, fim, responsavel, criado_por) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [setorU, listaSetores, inicio, fimISO, responsavel.toUpperCase(), req.gestor.id]
     );
     const escala = escRows[0];
     for (const c of incluidos) {
@@ -311,16 +322,16 @@ app.post("/api/escalas", autenticar, ah(async (req, res) => {
 app.get("/api/escalas", autenticar, ah(async (req, res) => {
   const { setor } = req.query;
   const { rows } = await pool.query(
-    setor ? "SELECT * FROM escalas WHERE setor = $1 ORDER BY inicio DESC" : "SELECT * FROM escalas ORDER BY inicio DESC",
+    setor ? "SELECT * FROM escalas WHERE $1 = ANY(setores) ORDER BY inicio DESC" : "SELECT * FROM escalas ORDER BY inicio DESC",
     setor ? [setor.toUpperCase()] : []
   );
   res.json(rows);
 }));
 
 app.delete("/api/escalas/:id", autenticar, ah(async (req, res) => {
-  const { rows } = await pool.query("SELECT setor FROM escalas WHERE id = $1", [req.params.id]);
+  const { rows } = await pool.query("SELECT setor, setores FROM escalas WHERE id = $1", [req.params.id]);
   if (!rows[0]) return res.status(404).json({ erro: "Escala não encontrada." });
-  if (!podeEditarSetor(req.gestor, rows[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+  if (!podeEditarEscala(req.gestor, rows[0])) return res.status(403).json({ erro: "Você não é responsável por este setor." });
   await pool.query("DELETE FROM escalas WHERE id = $1", [req.params.id]);
   res.status(204).end();
 }));
@@ -333,7 +344,7 @@ async function montarGrade(escalaId) {
 
   const { rows: alocacoes } = await pool.query(
     `SELECT a.id AS alocacao_id, c.* FROM alocacoes a JOIN colaboradores c ON c.id = a.colaborador_id WHERE a.escala_id = $1
-     ORDER BY c.cargo, c.regime, c.nome`,
+     ORDER BY c.setor, c.cargo, c.regime, c.nome`,
     [escala.id]
   );
   const { rows: overrides } = await pool.query(
@@ -356,7 +367,7 @@ async function montarGrade(escalaId) {
   const linhas = alocacoes.map((a) => ({
     alocacaoId: a.alocacao_id,
     colaborador: {
-      id: a.id, nome: a.nome, cargo: a.cargo, regime: a.regime, coren: a.coren || null,
+      id: a.id, nome: a.nome, setor: a.setor, cargo: a.cargo, regime: a.regime, coren: a.coren || null,
       // par/ímpar relativo ao mês de início DESTA escala (inverte após mês de 31 dias)
       grupo: REGIMES[a.regime] && REGIMES[a.regime].tipo === "paridade" ? grupoNaEscala(a, escala.inicio) : a.grupo,
     },
@@ -376,7 +387,8 @@ app.get("/api/escalas/:id/pdf", autenticar, ah(async (req, res) => {
   const grade = await montarGrade(req.params.id);
   if (!grade) return res.status(404).json({ erro: "Escala não encontrada." });
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="escala-${grade.escala.setor}-${grade.escala.inicio}.pdf"`);
+  const nomeArq = grade.escala.setor.replace(/[^A-Za-z0-9]+/g, "-");
+  res.setHeader("Content-Disposition", `inline; filename="escala-${nomeArq}-${grade.escala.inicio}.pdf"`);
   gerarPdfEscala(grade, res);
 }));
 
@@ -384,11 +396,11 @@ app.put("/api/alocacoes/:id/override", autenticar, ah(async (req, res) => {
   const { dia, codigo } = req.body || {};
   if (!dia) return res.status(400).json({ erro: "Informe o dia (YYYY-MM-DD)." });
   const { rows: aloc } = await pool.query(
-    `SELECT a.id, e.setor FROM alocacoes a JOIN escalas e ON e.id = a.escala_id WHERE a.id = $1`,
+    `SELECT a.id, e.setor, e.setores FROM alocacoes a JOIN escalas e ON e.id = a.escala_id WHERE a.id = $1`,
     [req.params.id]
   );
   if (!aloc[0]) return res.status(404).json({ erro: "Alocação não encontrada." });
-  if (!podeEditarSetor(req.gestor, aloc[0].setor)) return res.status(403).json({ erro: "Você não é responsável por este setor." });
+  if (!podeEditarEscala(req.gestor, aloc[0])) return res.status(403).json({ erro: "Você não é responsável por este setor." });
 
   if (!codigo) {
     await pool.query("DELETE FROM overrides WHERE alocacao_id = $1 AND dia = $2", [req.params.id, dia]);
